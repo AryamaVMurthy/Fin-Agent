@@ -38,6 +38,9 @@ Pending close after this report: `Fin-Agent-d5o.2` and parent epic `Fin-Agent-d5
    - Run directory: `.finagent/verification/rigorous-20260223T130632Z`
 5. `bash scripts/publish-readiness.sh --allow-dirty --skip-auth`
    - Result: `PASS` (`publish-readiness: READY`)
+6. `bash scripts/publish-readiness.sh`
+   - Result: `FAIL`
+   - Blocker: npm auth (`ENEEDAUTH`, requires `npm login` / `npm adduser`)
 
 ## Visual evidence
 
@@ -55,3 +58,7 @@ Current engineering readiness for web-first Stage 1 is green:
 1. Backend + wrapper + web bundle behavior verified.
 2. End-to-end deterministic and visual flows verified.
 3. Packaging and release-readiness checks verified (operator auth/clean-tree strict gates not asserted in this run).
+
+Strict publish blocker remaining:
+
+1. npm auth on this machine is not configured for publish.
