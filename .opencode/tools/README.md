@@ -6,49 +6,29 @@ Current implementation route:
 - Runtime API in `py/fin_agent/api/app.py`.
 - Wrapper process in `apps/fin-agent/src/index.mjs`.
 
-Planned tool mapping:
-- `brainstorm.session.*`
-- `brainstorm.agent_decides.*`
-- `strategy.*`
-- `world_state.*`
-- `backtest.*`
-- `visualize.*`
-- `job.status`
-- `auth.kite.connect`
-- `auth.kite.status`
-- `auth.opencode.openai.oauth.connect`
-- `auth.opencode.openai.oauth.status`
-- `kite.profile`
-- `kite.holdings`
-- `kite.instruments.sync`
-- `kite.candles.fetch`
-- `kite.quotes.fetch`
-- `nse.quote`
-- `tradingview.screener.run`
-- `screener.formula.validate`
-- `screener.run`
-- `world-state.build`
-- `world-state.validate`
-- `strategy.from-intent`
-- `backtest.run`
-- `backtest.compare`
-- `tuning.search-space.derive`
-- `tuning.run`
-- `analysis.deep-dive`
-- `visualize.trade-blotter`
-- `live.feed`
-- `session.diff`
-- `technicals.compute`
-- `universe.resolve`
-- `backtest.tax.report`
-- `diagnostics.readiness`
-- `providers.health`
-- `session.rehydrate`
-- `preflight.*`
-- `audit.events`
-- `code.strategy.validate`
-- `code.strategy.save`
-- `code.strategy.run_sandbox`
+Current agentic tool mapping (primary):
+- `code_strategy_validate`
+- `code_strategy_save`
+- `code_strategy_run_sandbox`
+- `code_strategy_backtest`
+- `code_strategy_analyze`
+- `preflight_custom_code`
+- `backtest_compare`
+- `visualize_trade_blotter`
+- `backtest_tax_report`
+- `world_state_build`
+- `world_state_validate`
+- `session_diff`
+- `session_rehydrate`
+- `technicals_compute`
+- `universe_resolve`
+- `screener_formula_validate`
+- `screener_run`
+- `kite_candles_fetch`
+- `kite_instruments_sync`
+- `auth_kite_status`
+- `providers_health`
+- `diagnostics_readiness`
 
 Kite API endpoints currently implemented:
 - `GET /v1/auth/kite/connect`
@@ -89,17 +69,25 @@ World-state + validation endpoints currently implemented:
 
 Preflight endpoints currently implemented:
 - `POST /v1/preflight/world-state`
-- `POST /v1/preflight/backtest`
-- `POST /v1/preflight/tuning`
 - `POST /v1/preflight/custom-code`
 
-Strategy/backtest control endpoints currently implemented:
-- `POST /v1/brainstorm/agent-decides/propose`
-- `POST /v1/brainstorm/agent-decides/confirm`
-- `POST /v1/backtests/compare`
-- `GET /v1/audit/events`
+Legacy preflight endpoints disabled:
+- `POST /v1/preflight/backtest` (HTTP 410)
+- `POST /v1/preflight/tuning` (HTTP 410)
 
-Custom code lane endpoints currently implemented:
+Agentic strategy control endpoints currently implemented:
 - `POST /v1/code-strategy/validate`
 - `POST /v1/code-strategy/save`
 - `POST /v1/code-strategy/run-sandbox`
+- `POST /v1/code-strategy/backtest`
+- `POST /v1/code-strategy/analyze`
+- `POST /v1/preflight/custom-code`
+- `POST /v1/backtests/compare`
+- `GET /v1/audit/events`
+
+Legacy intent-based endpoints are disabled (HTTP 410) and must never be used:
+- `/v1/brainstorm/*`
+- `/v1/strategy/from-intent`
+- `/v1/backtests/run*`
+- `/v1/tuning/*` (intent-based variants)
+- `/v1/analysis/deep-dive`

@@ -8,7 +8,7 @@ URL="${FIN_AGENT_WEB_URL:-http://127.0.0.1:18090}"
 API_BASE="${FIN_AGENT_API_BASE:-http://127.0.0.1:18080}"
 OUTPUT_DIR=""
 SEED=1
-CHAT_WARMUP=1
+CHAT_WARMUP=0
 DRY_RUN=0
 WEB_APP_DIR="${ROOT_DIR}/apps/fin-agent-web"
 
@@ -22,8 +22,8 @@ Options:
   --output-dir DIR     Output directory for results/traces
   --seed               Run deterministic seed before Playwright (default)
   --no-seed            Skip deterministic seed step
-  --chat-warmup        Send real warmup chat request before Playwright (default)
-  --no-chat-warmup     Skip chat warmup request
+  --chat-warmup        Send real warmup chat request before Playwright
+  --no-chat-warmup     Skip chat warmup request (default)
   --dry-run            Print planned actions and exit
   -h, --help           Show help
 USAGE

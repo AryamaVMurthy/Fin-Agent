@@ -4,12 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from fin_agent.backtest.runner import run_backtest
 from fin_agent.data.importer import import_ohlcv_file
 from fin_agent.storage.paths import RuntimePaths
-from fin_agent.strategy.models import IntentSnapshot
-from fin_agent.strategy.service import build_strategy_from_intent
-from fin_agent.world_state.service import build_world_state_manifest
 
 
 def cmd_import(args: argparse.Namespace) -> None:
@@ -19,29 +15,10 @@ def cmd_import(args: argparse.Namespace) -> None:
 
 
 def cmd_tracer(args: argparse.Namespace) -> None:
-    paths = RuntimePaths(root=Path(args.runtime_home))
-    intent = IntentSnapshot(
-        universe=[args.symbol],
-        start_date=args.start_date,
-        end_date=args.end_date,
-        initial_capital=args.initial_capital,
-        short_window=args.short_window,
-        long_window=args.long_window,
-        max_positions=1,
-    )
-    strategy = build_strategy_from_intent(intent, args.strategy_name)
-    manifest = build_world_state_manifest(paths, strategy.universe, strategy.start_date, strategy.end_date)
-    run = run_backtest(paths, strategy, manifest)
-    print(
-        json.dumps(
-            {
-                "run_id": run.run_id,
-                "strategy_name": run.strategy_name,
-                "metrics": run.metrics.__dict__,
-                "artifacts": run.artifacts.__dict__,
-            },
-            indent=2,
-        )
+    _ = RuntimePaths(root=Path(args.runtime_home))
+    raise SystemExit(
+        "run-tracer is disabled: legacy intent/manual strategy flow has been removed. "
+        "Use the agentic code-strategy flow via /v1/code-strategy/* tools."
     )
 
 

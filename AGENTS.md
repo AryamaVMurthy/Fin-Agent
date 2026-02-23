@@ -1,5 +1,18 @@
 # Agent Instructions
 
+## CRITICAL Agentic-Only Directive (Non-Negotiable)
+
+1. **EVERY strategy-conversion step MUST be agentic and prompt/tool/skill-driven.**
+2. **EVERY strategy-conversion step MUST be agentic and prompt/tool/skill-driven.**
+3. **EVERY strategy-conversion step MUST be agentic and prompt/tool/skill-driven.**
+4. **Do NOT use manual NL parsing, keyword extraction, regex conversion, or hardcoded mapping logic for natural-language strategy conversion.**
+5. **Do NOT use manual NL parsing, keyword extraction, regex conversion, or hardcoded mapping logic for natural-language strategy conversion.**
+6. **Do NOT use manual NL parsing, keyword extraction, regex conversion, or hardcoded mapping logic for natural-language strategy conversion.**
+7. **The agent must generate full Python strategy code in the required contract format, then validate and backtest it via tools.**
+8. **The agent must generate full Python strategy code in the required contract format, then validate and backtest it via tools.**
+9. **If an agentic conversion path is unavailable, fail fast with explicit remediation. Never silently downgrade to manual conversion.**
+10. **Manual conversion logic is prohibited in agent-facing flows. Manual conversion logic is prohibited in agent-facing flows.**
+
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
 ## Quick Reference
@@ -37,4 +50,3 @@ bd sync               # Sync with git
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
-

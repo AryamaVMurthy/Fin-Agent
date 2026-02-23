@@ -472,12 +472,15 @@ def list_backtest_runs(
     for row in rows:
         run_payload = json.loads(row["payload_json"])
         strategy_payload = run_payload.get("strategy", {})
+        strategy_name = strategy_payload.get("strategy_name")
+        if not strategy_name:
+            strategy_name = run_payload.get("strategy_name")
         payload.append(
             {
                 "run_id": row["id"],
                 "strategy_version_id": row["strategy_version_id"],
                 "world_manifest_id": row["world_manifest_id"],
-                "strategy_name": strategy_payload.get("strategy_name"),
+                "strategy_name": strategy_name,
                 "metrics": json.loads(row["metrics_json"]),
                 "artifacts": json.loads(row["artifacts_json"]),
                 "payload": run_payload,
@@ -601,6 +604,40 @@ def list_code_strategy_versions(paths: RuntimePaths, strategy_id: str, limit: in
         }
         for row in rows
     ]
+
+
+def get_code_strategy_version(paths: RuntimePaths, strategy_version_id: str) -> dict[str, Any]:
+    if not strategy_version_id.strip():
+        raise ValueError("strategy_version_id is required")
+    with connect(paths) as conn:
+        row = conn.execute(
+            """
+            SELECT
+              sv.id AS strategy_version_id,
+              sv.strategy_id AS strategy_id,
+              sv.version_number AS version_number,
+              sv.source_code AS source_code,
+              sv.validation_json AS validation_json,
+              sv.created_at AS created_at,
+              s.name AS strategy_name
+            FROM code_strategy_versions sv
+            INNER JOIN code_strategies s
+              ON s.id = sv.strategy_id
+            WHERE sv.id = ?
+            """,
+            (strategy_version_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"code_strategy_version not found: {strategy_version_id}")
+    return {
+        "strategy_version_id": row["strategy_version_id"],
+        "strategy_id": row["strategy_id"],
+        "strategy_name": row["strategy_name"],
+        "version_number": int(row["version_number"]),
+        "source_code": row["source_code"],
+        "validation": json.loads(row["validation_json"]),
+        "created_at": row["created_at"],
+    }
 
 
 def save_tuning_run(paths: RuntimePaths, strategy_name: str, payload: dict[str, Any]) -> str:

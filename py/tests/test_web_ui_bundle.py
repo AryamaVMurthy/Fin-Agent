@@ -7,35 +7,23 @@ from pathlib import Path
 class WebUiBundleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(__file__).resolve().parents[2]
-        self.index_html = (self.root / "apps" / "fin-agent-web" / "dist" / "index.html").read_text(encoding="utf-8")
-        self.app_js = (self.root / "apps" / "fin-agent-web" / "dist" / "assets" / "app.js").read_text(encoding="utf-8")
+        dist_dir = self.root / "apps" / "fin-agent-web" / "dist"
+        self.index_html = (dist_dir / "index.html").read_text(encoding="utf-8")
+        assets_dir = dist_dir / "assets"
+        js_assets = sorted(assets_dir.glob("*.js"))
+        self.assertGreater(len(js_assets), 0, "expected at least one compiled JS asset in dist/assets")
+        self.app_js = js_assets[0].read_text(encoding="utf-8")
 
-    def test_dist_bundle_has_chat_timeline_and_action_cards(self) -> None:
-        self.assertIn('id="chat-panel"', self.index_html)
-        self.assertIn('id="timeline-panel"', self.index_html)
-        self.assertIn('id="action-cards"', self.index_html)
+    def test_dist_bundle_has_root_and_compiled_asset_references(self) -> None:
+        self.assertIn('id="root"', self.index_html)
+        self.assertIn('/app/assets/index-', self.index_html)
+        self.assertIn('.js', self.index_html)
+        self.assertIn('.css', self.index_html)
 
-    def test_dist_bundle_has_workspace_sections(self) -> None:
-        self.assertIn('id="workspace-backtests"', self.index_html)
-        self.assertIn('id="workspace-tuning"', self.index_html)
-        self.assertIn('id="workspace-live"', self.index_html)
-        self.assertIn('id="workspace-diagnostics"', self.index_html)
-
-    def test_app_bundle_calls_required_chat_and_workspace_endpoints(self) -> None:
-        required = [
-            "/v1/chat/respond",
-            "/v1/chat/sessions",
-            "/v1/chat/sessions/",
-            "/v1/backtests/runs",
-            "/v1/tuning/runs",
-            "/v1/live/states",
-            "/v1/providers/health",
-            "/v1/diagnostics/readiness",
-            "/v1/audit/events",
-        ]
-        for endpoint in required:
-            with self.subTest(endpoint=endpoint):
-                self.assertIn(endpoint, self.app_js)
+    def test_app_bundle_contains_expected_stage1_scaffold_text(self) -> None:
+        self.assertIn("Fin-Agent Stage 1", self.app_js)
+        self.assertIn("Chat-centric strategy workspace powered by OpenCode + Fin-Agent tools.", self.app_js)
+        self.assertIn("Web UI scaffold ready", self.app_js)
 
 
 if __name__ == "__main__":

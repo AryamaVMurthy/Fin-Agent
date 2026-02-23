@@ -23,35 +23,40 @@ class AgentDecidesTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_propose_marks_assumed_fields(self) -> None:
-        response = app_module.brainstorm_agent_decides_propose(
-            app_module.AgentDecidesProposeRequest(universe=["ABC"], short_window=5)
-        )
-        self.assertIn("proposed_intent", response)
-        decision_card = response["decision_card"]
-        self.assertGreaterEqual(len(decision_card), 1)
-        assumed = [row for row in decision_card if row["source"] == "agent_assumed"]
-        self.assertGreaterEqual(len(assumed), 1)
-        for row in assumed:
-            self.assertTrue(row["rationale"])
+        with self.assertRaises(app_module.HTTPException) as ctx:
+            app_module.brainstorm_agent_decides_propose(
+                app_module.AgentDecidesProposeRequest(universe=["ABC"], short_window=5)
+            )
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
 
     def test_confirm_persists_intent_and_decision_log(self) -> None:
         paths = self._temp_paths()
-        propose = app_module.brainstorm_agent_decides_propose(
-            app_module.AgentDecidesProposeRequest(universe=["ABC"])
-        )
-
         request = app_module.AgentDecidesConfirmRequest(
-            intent=app_module.IntentSnapshot.model_validate(propose["proposed_intent"]),
-            decision_card=[app_module.DecisionCardItem.model_validate(item) for item in propose["decision_card"]],
+            intent={
+                "universe": ["ABC"],
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-10",
+                "initial_capital": 100000.0,
+                "short_window": 2,
+                "long_window": 4,
+                "max_positions": 1,
+            },
+            decision_card=[
+                app_module.DecisionCardItem(
+                    field="universe",
+                    value=["ABC"],
+                    source="user_explicit",
+                    rationale="provided directly by user",
+                    confidence=1.0,
+                )
+            ],
         )
         with patch.object(app_module, "_runtime_paths", return_value=paths):
-            result = app_module.brainstorm_agent_decides_confirm(request)
-
-        snapshot = sqlite_store.get_intent_snapshot(paths, result["intent_snapshot_id"])
-        self.assertEqual(snapshot["universe"], ["ABC"])
-        events = sqlite_store.list_audit_events(paths, event_type="brainstorm.agent_decides.confirm")
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["payload"]["intent_snapshot_id"], result["intent_snapshot_id"])
+            with self.assertRaises(app_module.HTTPException) as ctx:
+                app_module.brainstorm_agent_decides_confirm(request)
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
 
 
 if __name__ == "__main__":

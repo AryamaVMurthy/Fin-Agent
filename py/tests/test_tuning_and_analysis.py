@@ -6,8 +6,19 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fin_agent.api import app as app_module
-from fin_agent.storage import sqlite_store
 from fin_agent.storage.paths import RuntimePaths
+
+
+VALID_CODE = """
+def prepare(data_bundle, context):
+    return {"prepared": True}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.67, "reason_code": "signal_buy_analysis"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
 
 
 class TuningAndAnalysisTests(unittest.TestCase):
@@ -37,112 +48,82 @@ class TuningAndAnalysisTests(unittest.TestCase):
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
             app_module.startup()
             app_module.import_data(app_module.ImportRequest(path=str(csv_path)))
-
-        self.intent = app_module.IntentSnapshot(
-            universe=["ABC"],
-            start_date="2025-01-01",
-            end_date="2025-01-10",
-            initial_capital=100000.0,
-            short_window=2,
-            long_window=4,
-            max_positions=1,
-        )
+            run = app_module.code_strategy_backtest(
+                app_module.CodeStrategyBacktestRequest(
+                    strategy_name="AnalysisLane",
+                    source_code=VALID_CODE,
+                    universe=["ABC"],
+                    start_date="2025-01-01",
+                    end_date="2025-01-10",
+                    initial_capital=100000.0,
+                )
+            )
+        self.run_id = run["run_id"]
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_tuning_search_space_derivation(self) -> None:
+    def test_tuning_search_space_endpoint_is_disabled(self) -> None:
         request = app_module.TuningSearchSpaceRequest(
             strategy_name="TuneMe",
-            intent=self.intent,
             optimization_target="sharpe",
             risk_mode="balanced",
             policy_mode="agent_decides",
-            max_drawdown_limit=0.20,
-            turnover_cap=20,
-        )
-        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            payload = app_module.tuning_search_space_derive(request)
-
-        self.assertIn("search_space", payload)
-        self.assertIn("short_window", payload["search_space"])
-        self.assertIn("constraints", payload)
-        self.assertEqual(payload["constraints"]["turnover_cap"], 20)
-        self.assertEqual(payload["constraints"]["max_drawdown_limit"], 0.20)
-        self.assertIn("tuning_plan", payload)
-        self.assertIn("layers", payload["tuning_plan"])
-        self.assertIn("graph", payload["tuning_plan"])
-        self.assertGreaterEqual(payload["estimated_trials"], 1)
-
-    def test_tuning_search_space_user_selected_layers_freeze_others(self) -> None:
-        request = app_module.TuningSearchSpaceRequest(
-            strategy_name="TuneSelected",
-            intent=self.intent,
-            optimization_target="sharpe",
-            risk_mode="balanced",
-            policy_mode="user_selected",
-            include_layers=["signal"],
-        )
-        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            payload = app_module.tuning_search_space_derive(request)
-
-        self.assertEqual(payload["policy_mode"], "user_selected")
-        self.assertEqual(payload["tuning_plan"]["active_layers"], ["signal"])
-        self.assertGreater(len(payload["search_space"]["short_window"]), 1)
-        self.assertGreater(len(payload["search_space"]["long_window"]), 1)
-        self.assertEqual(payload["search_space"]["max_positions"], [1.0])
-        self.assertEqual(payload["search_space"]["cost_bps"], [5.0])
-
-    def test_tuning_search_space_invalid_layer_fails_fast(self) -> None:
-        request = app_module.TuningSearchSpaceRequest(
-            strategy_name="TuneInvalid",
-            intent=self.intent,
-            optimization_target="sharpe",
-            risk_mode="balanced",
-            policy_mode="user_selected",
-            include_layers=["unknown_layer"],
         )
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
             with self.assertRaises(app_module.HTTPException) as ctx:
                 app_module.tuning_search_space_derive(request)
-        self.assertEqual(ctx.exception.status_code, 400)
-        self.assertIn("unsupported include_layers", str(ctx.exception.detail))
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
 
-    def test_tuning_run_returns_best_candidate(self) -> None:
+    def test_tuning_run_endpoint_is_disabled(self) -> None:
         request = app_module.TuningRunRequest(
             strategy_name="TuneRun",
-            intent=self.intent,
             optimization_target="sharpe",
             risk_mode="balanced",
             policy_mode="agent_decides",
-            max_drawdown_limit=0.30,
-            turnover_cap=40,
             max_trials=5,
         )
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            payload = app_module.tuning_run(request)
+            with self.assertRaises(app_module.HTTPException) as ctx:
+                app_module.tuning_run(request)
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
 
-        self.assertIn("tuning_run_id", payload)
-        self.assertIn("best_candidate", payload)
-        self.assertGreaterEqual(payload["completed_trials"], 1)
-        self.assertLessEqual(payload["completed_trials"], 5)
-        self.assertIn("sensitivity_analysis", payload)
-        self.assertIn("tuning_plan", payload)
-        self.assertGreaterEqual(len(payload["sensitivity_analysis"]), 1)
-        trial_rows = sqlite_store.list_tuning_trials(self.paths, payload["tuning_run_id"])
-        layer_rows = sqlite_store.list_tuning_layer_decisions(self.paths, payload["tuning_run_id"])
-        self.assertGreaterEqual(len(trial_rows), 1)
-        self.assertGreaterEqual(len(layer_rows), 1)
-
-    def test_analysis_deep_dive_suggestions_have_evidence(self) -> None:
-        run_request = app_module.BacktestRequest(strategy_name="DeepDive", intent=self.intent)
+    def test_analysis_deep_dive_endpoint_is_disabled(self) -> None:
+        request = app_module.AnalysisDeepDiveRequest(run_id=self.run_id)
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            run_payload = app_module.backtest_run(run_request)
-            report = app_module.analysis_deep_dive(
-                app_module.AnalysisDeepDiveRequest(run_id=run_payload["run_id"])
-            )
+            with self.assertRaises(app_module.HTTPException) as ctx:
+                app_module.analysis_deep_dive(request)
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
 
-        self.assertEqual(report["run_id"], run_payload["run_id"])
+    def test_code_analysis_suggestions_have_evidence(self) -> None:
+        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
+            with patch(
+                "fin_agent.code_strategy.analysis.run_agent_json_task",
+                return_value={
+                    "summary": "Agent analysis complete",
+                    "suggestions": [
+                        {
+                            "title": "Reduce overfitting pressure",
+                            "evidence": "trade concentration is high in signal preview",
+                            "expected_impact": "Better out-of-sample resilience.",
+                            "confidence": 0.74,
+                            "patch": "if volatility < cap: signals.append({...})",
+                        }
+                    ],
+                },
+            ):
+                report = app_module.code_strategy_analyze(
+                    app_module.CodeStrategyAnalyzeRequest(
+                        run_id=self.run_id,
+                        source_code=VALID_CODE,
+                        max_suggestions=5,
+                    )
+                )
+
+        self.assertEqual(report["run_id"], self.run_id)
         self.assertGreaterEqual(report["suggestion_count"], 1)
         for suggestion in report["suggestions"]:
             self.assertTrue(suggestion["evidence"])

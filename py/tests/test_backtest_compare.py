@@ -5,12 +5,36 @@ import unittest
 from pathlib import Path
 
 from fin_agent.backtest.compare import compare_backtest_runs
-from fin_agent.backtest.runner import run_backtest
+from fin_agent.code_strategy.backtest import run_code_strategy_backtest
 from fin_agent.data.importer import import_ohlcv_file
 from fin_agent.storage.paths import RuntimePaths
-from fin_agent.strategy.models import IntentSnapshot
-from fin_agent.strategy.service import build_strategy_from_intent
-from fin_agent.world_state.service import build_world_state_manifest
+
+
+CODE_BUY = """
+def prepare(data_bundle, context):
+    return {"symbols": data_bundle.get("universe", [])}
+
+def generate_signals(frame, state, context):
+    symbols = state.get("symbols", [])
+    if not symbols:
+        return []
+    return [{"symbol": symbols[0], "signal": "buy", "strength": 0.8, "reason_code": "signal_buy"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+
+CODE_WATCH = """
+def prepare(data_bundle, context):
+    return {"symbols": data_bundle.get("universe", [])}
+
+def generate_signals(frame, state, context):
+    return []
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
 
 
 class BacktestCompareTests(unittest.TestCase):
@@ -39,34 +63,30 @@ class BacktestCompareTests(unittest.TestCase):
 
             paths = RuntimePaths(root=root)
             import_ohlcv_file(csv_path, paths)
-            manifest = build_world_state_manifest(paths, universe=["ABC"], start_date="2025-01-01", end_date="2025-01-10")
 
-            intent_a = IntentSnapshot(
+            run_a = run_code_strategy_backtest(
+                paths=paths,
+                strategy_name="Code A",
+                source_code=CODE_BUY,
                 universe=["ABC"],
                 start_date="2025-01-01",
                 end_date="2025-01-10",
                 initial_capital=100000.0,
-                short_window=2,
-                long_window=4,
-                max_positions=1,
             )
-            intent_b = IntentSnapshot(
+            run_b = run_code_strategy_backtest(
+                paths=paths,
+                strategy_name="Code B",
+                source_code=CODE_WATCH,
                 universe=["ABC"],
                 start_date="2025-01-01",
                 end_date="2025-01-10",
                 initial_capital=100000.0,
-                short_window=3,
-                long_window=5,
-                max_positions=1,
             )
 
-            run_a = run_backtest(paths, build_strategy_from_intent(intent_a, strategy_name="SMA A"), manifest)
-            run_b = run_backtest(paths, build_strategy_from_intent(intent_b, strategy_name="SMA B"), manifest)
+            report = compare_backtest_runs(paths, baseline_run_id=run_a["run_id"], candidate_run_id=run_b["run_id"])
 
-            report = compare_backtest_runs(paths, baseline_run_id=run_a.run_id, candidate_run_id=run_b.run_id)
-
-            self.assertEqual(report["baseline"]["run_id"], run_a.run_id)
-            self.assertEqual(report["candidate"]["run_id"], run_b.run_id)
+            self.assertEqual(report["baseline"]["run_id"], run_a["run_id"])
+            self.assertEqual(report["candidate"]["run_id"], run_b["run_id"])
             self.assertIn("metrics_delta", report)
             self.assertIn("total_return", report["metrics_delta"])
             self.assertIn("artifact_links", report)

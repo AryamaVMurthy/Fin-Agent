@@ -68,8 +68,7 @@ calls:
   - POST /v1/data/import/fundamentals
   - POST /v1/data/import/corporate-actions
   - POST /v1/data/import/ratings
-  - POST /v1/backtests/run (x2)
-  - POST /v1/tuning/run
+  - POST /v1/code-strategy/backtest (x2)
   - POST /v1/live/activate
 DRY
   exit 0
@@ -182,31 +181,50 @@ call("POST", "/v1/data/import/fundamentals", {"path": FUNDAMENTALS_CSV})
 call("POST", "/v1/data/import/corporate-actions", {"path": ACTIONS_CSV})
 call("POST", "/v1/data/import/ratings", {"path": RATINGS_CSV})
 
-intent_a = {
-    "universe": ["ABC"],
-    "start_date": "2025-01-01",
-    "end_date": "2025-01-10",
-    "initial_capital": 100000.0,
-    "short_window": 2,
-    "long_window": 4,
-    "max_positions": 1,
-}
-intent_b = {
-    **intent_a,
-    "short_window": 3,
-    "long_window": 5,
-}
+code_a = """
+def prepare(data_bundle, context):
+    return {"variant": "seed-a"}
 
-run_a = call("POST", "/v1/backtests/run", {"strategy_name": "UI Seed A", "intent": intent_a})
-run_b = call("POST", "/v1/backtests/run", {"strategy_name": "UI Seed B", "intent": intent_b})
-tuning = call(
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.66, "reason_code": "signal_buy_seed_a"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+code_b = """
+def prepare(data_bundle, context):
+    return {"variant": "seed-b"}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.58, "reason_code": "signal_buy_seed_b"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+run_a = call(
     "POST",
-    "/v1/tuning/run",
+    "/v1/code-strategy/backtest",
     {
-        "strategy_name": "UI Seed Tune",
-        "intent": intent_a,
-        "max_trials": 2,
-        "per_trial_estimated_seconds": 0.01,
+        "strategy_name": "UI Seed A",
+        "source_code": code_a,
+        "universe": ["ABC"],
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-10",
+        "initial_capital": 100000.0,
+    },
+)
+run_b = call(
+    "POST",
+    "/v1/code-strategy/backtest",
+    {
+        "strategy_name": "UI Seed B",
+        "source_code": code_b,
+        "universe": ["ABC"],
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-10",
+        "initial_capital": 100000.0,
     },
 )
 
@@ -221,12 +239,9 @@ summary = {
     "backtest_run_ids": [run_a.get("run_id"), run_b.get("run_id")],
     "strategy_version_id": strategy_version_id,
     "live_strategy_version_id": strategy_version_id,
-    "tuning_run_id": tuning.get("tuning_run_id"),
 }
 if not all(isinstance(x, str) and x.strip() for x in summary["backtest_run_ids"]):
     raise RuntimeError(f"seed failed: invalid backtest run ids: {summary['backtest_run_ids']}")
-if not isinstance(summary["tuning_run_id"], str) or not summary["tuning_run_id"].strip():
-    raise RuntimeError(f"seed failed: invalid tuning_run_id: {summary['tuning_run_id']}")
 
 OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
 OUTPUT_JSON.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")

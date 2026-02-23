@@ -4,13 +4,24 @@ from pathlib import Path
 
 
 class TracerFlowTests(unittest.TestCase):
-    def test_sma_strategy_backtest_produces_metrics(self) -> None:
-        from fin_agent.backtest.runner import run_backtest
+    def test_code_strategy_backtest_produces_metrics(self) -> None:
+        from fin_agent.code_strategy.backtest import run_code_strategy_backtest
         from fin_agent.data.importer import import_ohlcv_file
         from fin_agent.storage.paths import RuntimePaths
-        from fin_agent.strategy.models import IntentSnapshot
-        from fin_agent.strategy.service import build_strategy_from_intent
-        from fin_agent.world_state.service import build_world_state_manifest
+
+        strategy_code = """
+def prepare(data_bundle, context):
+    return {"symbols": data_bundle.get("universe", [])}
+
+def generate_signals(frame, state, context):
+    symbols = state.get("symbols", [])
+    if not symbols:
+        return []
+    return [{"symbol": symbols[0], "signal": "buy", "strength": 0.8, "reason_code": "signal_buy"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -35,25 +46,21 @@ class TracerFlowTests(unittest.TestCase):
             )
             paths = RuntimePaths(root=root)
             import_ohlcv_file(csv_path, paths)
-            intent = IntentSnapshot(
+            run = run_code_strategy_backtest(
+                paths=paths,
+                strategy_name="Code Tracer",
+                source_code=strategy_code,
                 universe=["ABC"],
                 start_date="2025-01-01",
                 end_date="2025-01-10",
                 initial_capital=100000.0,
-                short_window=2,
-                long_window=4,
-                max_positions=1,
             )
-            strategy = build_strategy_from_intent(intent, strategy_name="SMA Tracer")
-            manifest = build_world_state_manifest(paths, universe=["ABC"], start_date="2025-01-01", end_date="2025-01-10")
-            run = run_backtest(paths, strategy, manifest)
 
-            self.assertEqual(run.strategy_name, "SMA Tracer")
-            self.assertGreater(run.metrics.final_equity, 0)
-            self.assertIsNotNone(run.artifacts.equity_curve_path)
-            self.assertIsNotNone(run.artifacts.drawdown_path)
+            self.assertEqual(run["strategy_name"], "Code Tracer")
+            self.assertGreater(float(run["metrics"]["final_equity"]), 0)
+            self.assertTrue(run["artifacts"]["equity_curve_path"])
+            self.assertTrue(run["artifacts"]["drawdown_path"])
 
 
 if __name__ == "__main__":
     unittest.main()
-

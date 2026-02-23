@@ -15,13 +15,27 @@ if [[ "${FIN_AGENT_OPENCODE_USE_GLOBAL_CONFIG:-0}" != "1" ]]; then
   CONFIG_DIR="${CONFIG_HOME_BASE}/opencode"
   CONFIG_PATH="${CONFIG_DIR}/opencode.json"
   MODEL_VALUE="${FIN_AGENT_OPENCODE_MODEL:-openai/gpt-5.2-codex}"
+  LOCAL_PLUGIN_ORCHESTRATOR="${ROOT_DIR}/.opencode/plugins/finagent-orchestrator.ts"
+  LOCAL_PLUGIN_TOOLS="${ROOT_DIR}/.opencode/tools/finagent-tools.ts"
+  LOCAL_PLUGIN_PACKAGE="${ROOT_DIR}/.opencode/node_modules/@opencode-ai/plugin"
   mkdir -p "${CONFIG_DIR}"
+  if [[ ! -f "${LOCAL_PLUGIN_ORCHESTRATOR}" || ! -f "${LOCAL_PLUGIN_TOOLS}" ]]; then
+    echo "missing required Fin-Agent OpenCode plugin files under .opencode/plugins or .opencode/tools" >&2
+    exit 1
+  fi
+  if [[ ! -d "${LOCAL_PLUGIN_PACKAGE}" ]]; then
+    echo "missing .opencode dependency @opencode-ai/plugin at ${LOCAL_PLUGIN_PACKAGE}" >&2
+    echo "Run: npm --prefix ${ROOT_DIR}/.opencode install" >&2
+    exit 1
+  fi
   if [[ "${FIN_AGENT_OPENCODE_PRESERVE_CONFIG:-0}" != "1" || ! -f "${CONFIG_PATH}" ]]; then
     cat > "${CONFIG_PATH}" <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "${MODEL_VALUE}",
   "plugin": [
+    "${LOCAL_PLUGIN_ORCHESTRATOR}",
+    "${LOCAL_PLUGIN_TOOLS}",
     "oh-my-opencode",
     "opencode-beads"
   ]

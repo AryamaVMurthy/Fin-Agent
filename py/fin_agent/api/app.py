@@ -16,16 +16,11 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from fin_agent.backtest.runner import run_backtest
 from fin_agent.backtest.compare import compare_backtest_runs
-from fin_agent.analysis.deep_dive import analyze_backtest_run
 from fin_agent.analysis.preflight import (
-    enforce_backtest_budget,
     enforce_custom_code_budget,
-    enforce_tuning_budget,
     enforce_world_state_budget,
 )
-from fin_agent.analysis.tuning import TuningConstraints, derive_tuning_plan, run_tuning
 from fin_agent.code_strategy.analysis import analyze_code_strategy_run
 from fin_agent.code_strategy.backtest import run_code_strategy_backtest
 from fin_agent.code_strategy.runner import run_code_strategy_sandbox
@@ -51,8 +46,6 @@ from fin_agent.security import encryption_enabled, redact_payload
 from fin_agent.screener.service import run_formula_screen, validate_formula
 from fin_agent.storage import duckdb_store, sqlite_store
 from fin_agent.storage.paths import RuntimePaths
-from fin_agent.strategy.models import IntentSnapshot, StrategySpec
-from fin_agent.strategy.service import build_strategy_from_intent
 from fin_agent.tax import IndiaTaxAssumptions, compute_tax_report
 from fin_agent.world_state.service import (
     build_data_completeness_report,
@@ -161,8 +154,6 @@ class FundamentalsAsOfRequest(BaseModel):
 
 class StrategyBuildRequest(BaseModel):
     strategy_name: str = Field(min_length=3)
-    intent_snapshot_id: Optional[str] = None
-    intent: Optional[IntentSnapshot] = None
 
 
 class AgentDecidesProposeRequest(BaseModel):
@@ -184,7 +175,7 @@ class DecisionCardItem(BaseModel):
 
 
 class AgentDecidesConfirmRequest(BaseModel):
-    intent: IntentSnapshot
+    intent: dict[str, Any]
     decision_card: list[DecisionCardItem]
 
 
@@ -213,8 +204,6 @@ class TechnicalsRequest(BaseModel):
 
 class BacktestRequest(BaseModel):
     strategy_name: str
-    intent_snapshot_id: Optional[str] = None
-    intent: Optional[IntentSnapshot] = None
 
 
 class BacktestCompareRequest(BaseModel):
@@ -274,8 +263,6 @@ class CodeStrategyAnalyzeRequest(BaseModel):
 
 class TuningSearchSpaceRequest(BaseModel):
     strategy_name: str = Field(min_length=1)
-    intent_snapshot_id: Optional[str] = None
-    intent: Optional[IntentSnapshot] = None
     optimization_target: str = "sharpe"
     risk_mode: str = "balanced"
     policy_mode: str = "agent_decides"
@@ -1044,100 +1031,21 @@ def fundamentals_as_of(request: FundamentalsAsOfRequest) -> dict[str, Any]:
 
 
 @app.post("/v1/brainstorm/lock")
-def lock_intent(intent: IntentSnapshot) -> dict[str, Any]:
-    paths = _runtime_paths()
-    snapshot_id = sqlite_store.save_intent_snapshot(paths, intent.model_dump())
-    _append_audit_event(paths, "brainstorm.lock", {"intent_snapshot_id": snapshot_id, "intent": intent.model_dump()})
-    return {"intent_snapshot_id": snapshot_id}
-
-
-def _decision_item(field: str, value: Any, source: str, rationale: str, confidence: float) -> dict[str, Any]:
-    return {
-        "field": field,
-        "value": value,
-        "source": source,
-        "rationale": rationale,
-        "confidence": confidence,
-    }
+def lock_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    _legacy_endpoint_disabled("/v1/brainstorm/lock")
+    return {}
 
 
 @app.post("/v1/brainstorm/agent-decides/propose")
 def brainstorm_agent_decides_propose(request: AgentDecidesProposeRequest) -> dict[str, Any]:
-    defaults: dict[str, tuple[Any, str]] = {
-        "universe": (["NIFTY50"], "default diversified baseline universe template"),
-        "start_date": ("2020-01-01", "default historical window start for robust backtest coverage"),
-        "end_date": ("2020-12-31", "default historical window end for one-year baseline"),
-        "initial_capital": (100000.0, "default baseline notional capital template"),
-        "short_window": (5, "default fast moving-average lookback template"),
-        "long_window": (20, "default slow moving-average lookback template"),
-        "max_positions": (5, "default portfolio breadth template"),
-    }
-
-    provided: dict[str, Any] = {
-        "universe": request.universe,
-        "start_date": request.start_date,
-        "end_date": request.end_date,
-        "initial_capital": request.initial_capital,
-        "short_window": request.short_window,
-        "long_window": request.long_window,
-        "max_positions": request.max_positions,
-    }
-
-    merged: dict[str, Any] = {}
-    decision_card: list[dict[str, Any]] = []
-    for field, value in provided.items():
-        if value is not None:
-            if field == "universe" and isinstance(value, list) and len(value) == 0:
-                raise HTTPException(status_code=400, detail="universe cannot be empty when provided")
-            merged[field] = value
-            decision_card.append(
-                _decision_item(
-                    field=field,
-                    value=value,
-                    source="user_explicit",
-                    rationale="provided directly by user",
-                    confidence=1.0,
-                )
-            )
-            continue
-        default_value, rationale = defaults[field]
-        merged[field] = default_value
-        decision_card.append(
-            _decision_item(
-                field=field,
-                value=default_value,
-                source="agent_assumed",
-                rationale=rationale,
-                confidence=0.7,
-            )
-        )
-
-    try:
-        intent = IntentSnapshot.model_validate(merged)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"agent_decides proposal invalid: {exc}") from exc
-
-    return {
-        "mode": "agent_decides",
-        "proposed_intent": intent.model_dump(),
-        "decision_card": decision_card,
-    }
+    _legacy_endpoint_disabled("/v1/brainstorm/agent-decides/propose")
+    return {}
 
 
 @app.post("/v1/brainstorm/agent-decides/confirm")
 def brainstorm_agent_decides_confirm(request: AgentDecidesConfirmRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    snapshot_id = sqlite_store.save_intent_snapshot(paths, request.intent.model_dump())
-    _append_audit_event(
-        paths,
-        "brainstorm.agent_decides.confirm",
-        {
-            "intent_snapshot_id": snapshot_id,
-            "intent": request.intent.model_dump(),
-            "decision_card": [item.model_dump() for item in request.decision_card],
-        },
-    )
-    return {"intent_snapshot_id": snapshot_id, "decision_count": len(request.decision_card)}
+    _legacy_endpoint_disabled("/v1/brainstorm/agent-decides/confirm")
+    return {}
 
 
 @app.post("/v1/code-strategy/validate")
@@ -1299,28 +1207,64 @@ def code_strategy_analyze(request: CodeStrategyAnalyzeRequest) -> dict[str, Any]
     return report
 
 
-def _resolve_intent(paths: RuntimePaths, request: StrategyBuildRequest | BacktestRequest) -> IntentSnapshot:
-    if request.intent is not None:
-        return request.intent
-    if not request.intent_snapshot_id:
-        raise ValueError("intent_snapshot_id or intent is required")
-    data = sqlite_store.get_intent_snapshot(paths, request.intent_snapshot_id)
-    return IntentSnapshot.model_validate(data)
+def _legacy_endpoint_disabled(path: str) -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": "legacy_endpoint_disabled",
+            "path": path,
+            "reason": "legacy intent/manual strategy flow has been removed",
+            "remediation": {
+                "required_flow": [
+                    "code_strategy_validate",
+                    "preflight_custom_code",
+                    "code_strategy_run_sandbox",
+                    "code_strategy_backtest",
+                    "code_strategy_analyze",
+                    "code_strategy_save",
+                ],
+                "message": "Use agent-generated Python strategy code and code-strategy tools only.",
+            },
+        },
+    )
 
 
-def _resolve_tuning_intent(paths: RuntimePaths, request: TuningSearchSpaceRequest) -> IntentSnapshot:
-    if request.intent is not None:
-        return request.intent
-    if not request.intent_snapshot_id:
-        raise ValueError("intent_snapshot_id or intent is required")
-    payload = sqlite_store.get_intent_snapshot(paths, request.intent_snapshot_id)
-    return IntentSnapshot.model_validate(payload)
-
-
-def _resolve_strategy_version(paths: RuntimePaths, strategy_version_id: str) -> tuple[str, StrategySpec]:
-    data = sqlite_store.get_strategy_version(paths, strategy_version_id)
-    spec = StrategySpec.model_validate(data["spec"])
-    return data["strategy_version_id"], spec
+def _resolve_code_strategy_runtime(paths: RuntimePaths, strategy_version_id: str) -> dict[str, Any]:
+    version = sqlite_store.get_code_strategy_version(paths, strategy_version_id)
+    validation = version.get("validation", {})
+    if not isinstance(validation, dict) or not bool(validation.get("valid", False)):
+        raise ValueError(
+            f"code strategy version is not valid for runtime: strategy_version_id={strategy_version_id}; "
+            "re-validate and save strategy code before activation"
+        )
+    runs = sqlite_store.list_backtest_runs(paths, strategy_version_id=strategy_version_id, limit=1)
+    if not runs:
+        raise ValueError(
+            f"no backtest run found for strategy_version_id={strategy_version_id}; "
+            "run /v1/code-strategy/backtest first to establish runtime universe"
+        )
+    latest_run = runs[0]
+    payload = latest_run.get("payload", {})
+    universe = payload.get("universe")
+    if not isinstance(universe, list) or len(universe) == 0:
+        raise ValueError(
+            f"backtest payload missing universe for strategy_version_id={strategy_version_id}; "
+            "rerun /v1/code-strategy/backtest with a non-empty universe"
+        )
+    end_date = str(payload.get("end_date", "")).strip()
+    if not end_date:
+        raise ValueError(
+            f"backtest payload missing end_date for strategy_version_id={strategy_version_id}; "
+            "rerun /v1/code-strategy/backtest with explicit date range"
+        )
+    return {
+        "strategy_version_id": version["strategy_version_id"],
+        "strategy_name": version["strategy_name"],
+        "source_code": version["source_code"],
+        "universe": [str(item) for item in universe],
+        "end_date": end_date,
+        "latest_run_id": latest_run.get("run_id"),
+    }
 
 
 def _read_csv_rows(path: str) -> list[dict[str, Any]]:
@@ -1334,45 +1278,20 @@ def _read_csv_rows(path: str) -> list[dict[str, Any]]:
 
 @app.post("/v1/strategy/from-intent")
 def strategy_from_intent(request: StrategyBuildRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    intent = _resolve_intent(paths, request)
-    strategy = build_strategy_from_intent(intent, strategy_name=request.strategy_name)
-    version = sqlite_store.save_strategy_version(paths, request.strategy_name, strategy.model_dump())
-    _append_audit_event(
-        paths,
-        "strategy.create",
-        {
-            "strategy_id": version.strategy_id,
-            "strategy_version_id": version.version_id,
-            "version_number": version.version_number,
-        },
-    )
-    return {
-        "strategy": strategy.model_dump(),
-        "strategy_id": version.strategy_id,
-        "strategy_version_id": version.version_id,
-        "version_number": version.version_number,
-    }
+    _legacy_endpoint_disabled("/v1/strategy/from-intent")
+    return {}
 
 
 @app.get("/v1/strategies")
 def strategies_list(limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        strategies = sqlite_store.list_strategies(paths, limit=limit)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"strategies": strategies, "count": len(strategies)}
+    _legacy_endpoint_disabled("/v1/strategies")
+    return {}
 
 
 @app.get("/v1/strategies/{strategy_id}/versions")
 def strategy_versions_list(strategy_id: str, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        versions = sqlite_store.list_strategy_versions(paths, strategy_id=strategy_id, limit=limit)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"strategy_id": strategy_id, "versions": versions, "count": len(versions)}
+    _legacy_endpoint_disabled("/v1/strategies/{strategy_id}/versions")
+    return {}
 
 
 @app.post("/v1/world-state/build")
@@ -1450,24 +1369,14 @@ def preflight_world_state(request: PreflightWorldStateRequest) -> dict[str, floa
 
 @app.post("/v1/preflight/backtest")
 def preflight_backtest(request: PreflightBacktestRequest) -> dict[str, float]:
-    paths = _runtime_paths()
-    try:
-        intent = _resolve_intent(paths, request)
-        return enforce_backtest_budget(paths, intent, request.max_allowed_seconds)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _legacy_endpoint_disabled("/v1/preflight/backtest")
+    return {}
 
 
 @app.post("/v1/preflight/tuning")
 def preflight_tuning(request: PreflightTuningRequest) -> dict[str, float]:
-    try:
-        return enforce_tuning_budget(
-            num_trials=request.num_trials,
-            per_trial_estimated_seconds=request.per_trial_estimated_seconds,
-            max_estimated_seconds=request.max_allowed_seconds,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _legacy_endpoint_disabled("/v1/preflight/tuning")
+    return {}
 
 
 @app.post("/v1/preflight/custom-code")
@@ -1578,82 +1487,14 @@ def nse_quote(request: NseQuoteRequest) -> dict[str, Any]:
 
 @app.post("/v1/tuning/search-space/derive")
 def tuning_search_space_derive(request: TuningSearchSpaceRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        intent = _resolve_tuning_intent(paths, request)
-        strategy = build_strategy_from_intent(intent, strategy_name=request.strategy_name)
-        tuning_plan = derive_tuning_plan(
-            strategy=strategy,
-            risk_mode=request.risk_mode,
-            optimization_target=request.optimization_target,
-            policy_mode=request.policy_mode,
-            include_layers=request.include_layers,
-            freeze_params=request.freeze_params,
-            search_space_overrides=request.search_space_overrides,
-        )
-        search_space = tuning_plan["search_space"]
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "strategy_name": request.strategy_name,
-        "strategy": strategy.model_dump(),
-        "optimization_target": request.optimization_target,
-        "risk_mode": request.risk_mode,
-        "policy_mode": tuning_plan["policy_mode"],
-        "search_space": search_space,
-        "tuning_plan": tuning_plan,
-        "estimated_trials": tuning_plan["estimated_trials"],
-        "constraints": {
-            "max_drawdown_limit": request.max_drawdown_limit,
-            "turnover_cap": request.turnover_cap,
-        },
-        "editable": True,
-    }
+    _legacy_endpoint_disabled("/v1/tuning/search-space/derive")
+    return {}
 
 
 @app.post("/v1/tuning/run")
 def tuning_run(request: TuningRunRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        intent = _resolve_tuning_intent(paths, request)
-        strategy = build_strategy_from_intent(intent, strategy_name=request.strategy_name)
-        manual_overrides = request.search_space or request.search_space_overrides
-        tuning_plan = derive_tuning_plan(
-            strategy=strategy,
-            risk_mode=request.risk_mode,
-            optimization_target=request.optimization_target,
-            policy_mode=request.policy_mode,
-            include_layers=request.include_layers,
-            freeze_params=request.freeze_params,
-            search_space_overrides=manual_overrides,
-        )
-        search_space = tuning_plan["search_space"]
-        preflight = enforce_tuning_budget(
-            num_trials=request.max_trials,
-            per_trial_estimated_seconds=request.per_trial_estimated_seconds,
-            max_estimated_seconds=_max_backtest_seconds(),
-        )
-        report = run_tuning(
-            paths=paths,
-            strategy_name=request.strategy_name,
-            base_strategy=strategy,
-            search_space=search_space,
-            optimization_target=request.optimization_target,
-            constraints=TuningConstraints(
-                max_drawdown_limit=request.max_drawdown_limit,
-                turnover_cap=request.turnover_cap,
-            ),
-            max_trials=request.max_trials,
-            tuning_plan=tuning_plan,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        **report,
-        "preflight": preflight,
-    }
+    _legacy_endpoint_disabled("/v1/tuning/run")
+    return {}
 
 
 @app.get("/v1/tuning/runs")
@@ -1687,20 +1528,8 @@ def tuning_run_detail(tuning_run_id: str) -> dict[str, Any]:
 
 @app.post("/v1/analysis/deep-dive")
 def analysis_deep_dive(request: AnalysisDeepDiveRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        report = analyze_backtest_run(paths, request.run_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _append_audit_event(
-        paths,
-        "analysis.deep_dive",
-        {
-            "run_id": request.run_id,
-            "suggestion_count": report["suggestion_count"],
-        },
-    )
-    return report
+    _legacy_endpoint_disabled("/v1/analysis/deep-dive")
+    return {}
 
 
 @app.post("/v1/visualize/trade-blotter")
@@ -1721,7 +1550,8 @@ def visualize_trade_blotter(request: TradeBlotterRequest) -> dict[str, Any]:
     threshold_crossings = [
         row
         for row in signals
-        if row.get("reason_code") in {"sma_cross_up", "sma_cross_down"}
+        if str(row.get("reason_code", "")).startswith("signal_")
+        or str(row.get("reason_code", "")).startswith("sma_cross")
     ]
     return {
         "run_id": request.run_id,
@@ -1740,8 +1570,14 @@ def visualize_trade_blotter(request: TradeBlotterRequest) -> dict[str, Any]:
 def visualize_boundary(request: BoundaryVisualizationRequest) -> dict[str, Any]:
     paths = _runtime_paths()
     try:
-        strategy_version_id, strategy = _resolve_strategy_version(paths, request.strategy_version_id)
-        snapshot = build_live_snapshot(paths, strategy)
+        runtime = _resolve_code_strategy_runtime(paths, request.strategy_version_id)
+        strategy_version_id = runtime["strategy_version_id"]
+        snapshot = build_live_snapshot(
+            paths,
+            source_code=runtime["source_code"],
+            universe=runtime["universe"],
+            end_date=runtime["end_date"],
+        )
         candidates = select_boundary_candidates(snapshot, top_k=request.top_k)
         chart_path = write_boundary_chart(paths, strategy_version_id, candidates)
     except ValueError as exc:
@@ -1750,7 +1586,7 @@ def visualize_boundary(request: BoundaryVisualizationRequest) -> dict[str, Any]:
         "strategy_version_id": strategy_version_id,
         "boundary_chart_path": chart_path,
         "candidates": candidates,
-        "similarity_method": "distance_to_sma_crossover_boundary",
+        "similarity_method": "distance_to_signal_decision_boundary",
     }
 
 
@@ -1758,8 +1594,14 @@ def visualize_boundary(request: BoundaryVisualizationRequest) -> dict[str, Any]:
 def live_activate(request: LiveActivateRequest) -> dict[str, Any]:
     paths = _runtime_paths()
     try:
-        strategy_version_id, strategy = _resolve_strategy_version(paths, request.strategy_version_id)
-        snapshot = build_live_snapshot(paths, strategy)
+        runtime = _resolve_code_strategy_runtime(paths, request.strategy_version_id)
+        strategy_version_id = runtime["strategy_version_id"]
+        snapshot = build_live_snapshot(
+            paths,
+            source_code=runtime["source_code"],
+            universe=runtime["universe"],
+            end_date=runtime["end_date"],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1776,10 +1618,12 @@ def live_activate(request: LiveActivateRequest) -> dict[str, Any]:
     sqlite_store.upsert_live_state(
         paths,
         strategy_version_id=strategy_version_id,
-        strategy_name=strategy.strategy_name,
+        strategy_name=runtime["strategy_name"],
         status="active",
         payload={
             "last_snapshot_size": len(snapshot),
+            "universe_size": len(runtime["universe"]),
+            "latest_backtest_run_id": runtime["latest_run_id"],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -1866,8 +1710,14 @@ def live_feed(strategy_version_id: str | None = None, limit: int = 100) -> dict[
 def live_boundary_candidates(strategy_version_id: str, top_k: int = 10) -> dict[str, Any]:
     paths = _runtime_paths()
     try:
-        strategy_version_id, strategy = _resolve_strategy_version(paths, strategy_version_id)
-        snapshot = build_live_snapshot(paths, strategy)
+        runtime = _resolve_code_strategy_runtime(paths, strategy_version_id)
+        strategy_version_id = runtime["strategy_version_id"]
+        snapshot = build_live_snapshot(
+            paths,
+            source_code=runtime["source_code"],
+            universe=runtime["universe"],
+            end_date=runtime["end_date"],
+        )
         candidates = select_boundary_candidates(snapshot, top_k=top_k)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1875,7 +1725,7 @@ def live_boundary_candidates(strategy_version_id: str, top_k: int = 10) -> dict[
         "strategy_version_id": strategy_version_id,
         "candidates": candidates,
         "count": len(candidates),
-        "similarity_method": "distance_to_sma_crossover_boundary",
+        "similarity_method": "distance_to_signal_decision_boundary",
     }
 
 
@@ -1904,98 +1754,26 @@ def backtest_run_detail(run_id: str) -> dict[str, Any]:
 
 
 def _run_backtest_job(paths: RuntimePaths, job_id: str, trace_id: str) -> None:
-    token = set_trace_id(trace_id)
-    job = sqlite_store.get_job(paths, job_id)
-    payload = job["payload"]
-    try:
-        sqlite_store.update_job_status(paths, job_id, "running")
-        sqlite_store.append_job_event(paths, job_id, "job.running", {"job_id": job_id, "trace_id": trace_id})
-
-        request = BacktestRequest.model_validate(payload)
-        intent = _resolve_intent(paths, request)
-        budget = enforce_backtest_budget(paths, intent, _max_backtest_seconds())
-        sqlite_store.append_job_event(paths, job_id, "job.preflight_passed", {**budget, "trace_id": trace_id})
-        strategy = build_strategy_from_intent(intent, strategy_name=request.strategy_name)
-        manifest = build_world_state_manifest(paths, strategy.universe, strategy.start_date, strategy.end_date)
-        run = run_backtest(paths, strategy, manifest)
-
-        result = {
-            "run_id": run.run_id,
-            "strategy_name": run.strategy_name,
-            "strategy_version_id": run.strategy_version_id,
-            "world_manifest_id": run.world_manifest_id,
-            "metrics": run.metrics.__dict__,
-            "artifacts": run.artifacts.__dict__,
-            "trace_id": trace_id,
-        }
-        sqlite_store.update_job_status(paths, job_id, "completed", result=result)
-        sqlite_store.append_job_event(paths, job_id, "job.completed", result)
-    except Exception as exc:  # noqa: BLE001
-        sqlite_store.update_job_status(paths, job_id, "failed", error_text=str(exc))
-        sqlite_store.append_job_event(
-            paths,
-            job_id,
-            "job.failed",
-            {
-                "trace_id": trace_id,
-                "error": str(exc),
-                "remediation": "inspect payload and preflight constraints; retry with smaller scope or corrected inputs",
-            },
-        )
-        _write_structured_log(
-            "job.error",
-            {
-                "job_id": job_id,
-                "trace_id": trace_id,
-                "error": str(exc),
-                "remediation": "inspect job.failed event payload and rerun with corrected input",
-            },
-        )
-    finally:
-        reset_trace_id(token)
+    sqlite_store.update_job_status(
+        paths,
+        job_id,
+        "failed",
+        error_text=(
+            "legacy async backtest jobs are disabled; use code_strategy_backtest from agent tools"
+        ),
+    )
 
 
 @app.post("/v1/backtests/run")
 def backtest_run(request: BacktestRequest) -> dict[str, Any]:
-    paths = _runtime_paths()
-    try:
-        intent = _resolve_intent(paths, request)
-        preflight = enforce_backtest_budget(paths, intent, _max_backtest_seconds())
-        strategy = build_strategy_from_intent(intent, strategy_name=request.strategy_name)
-        manifest = build_world_state_manifest(paths, strategy.universe, strategy.start_date, strategy.end_date)
-        run = run_backtest(paths, strategy, manifest)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "run_id": run.run_id,
-        "strategy_name": run.strategy_name,
-        "strategy_version_id": run.strategy_version_id,
-        "world_manifest_id": run.world_manifest_id,
-        "preflight": preflight,
-        "metrics": run.metrics.__dict__,
-        "artifacts": run.artifacts.__dict__,
-    }
+    _legacy_endpoint_disabled("/v1/backtests/run")
+    return {}
 
 
 @app.post("/v1/backtests/run-async")
 def backtest_run_async(request: BacktestRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
-    paths = _runtime_paths()
-    sqlite_store.init_db(paths)
-    try:
-        intent = _resolve_intent(paths, request)
-        preflight = enforce_backtest_budget(paths, intent, _max_backtest_seconds())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    trace_id = _current_trace_id()
-    job_id = sqlite_store.create_job(paths, "backtest.run", request.model_dump())
-    sqlite_store.append_job_event(
-        paths,
-        job_id,
-        "job.queued",
-        {"job_id": job_id, "trace_id": trace_id, "preflight": preflight},
-    )
-    background_tasks.add_task(_run_backtest_job, paths, job_id, trace_id)
-    return {"job_id": job_id, "status": "queued", "trace_id": trace_id}
+    _legacy_endpoint_disabled("/v1/backtests/run-async")
+    return {}
 
 
 @app.post("/v1/backtests/compare")
@@ -2033,7 +1811,17 @@ def backtest_tax_report(request: BacktestTaxReportRequest) -> dict[str, Any]:
     if not trade_path:
         raise HTTPException(status_code=400, detail="run artifacts missing trade_blotter_path")
 
-    strategy = run.get("payload", {}).get("strategy", {})
+    payload = run.get("payload", {})
+    strategy = payload.get("strategy", {})
+    if not isinstance(strategy, dict) or not strategy:
+        strategy = {
+            "strategy_name": payload.get("strategy_name"),
+            "initial_capital": payload.get("initial_capital"),
+            "max_positions": max(1, len(payload.get("universe", []))) if isinstance(payload.get("universe", []), list) else 1,
+            "universe": payload.get("universe", []),
+            "start_date": payload.get("start_date"),
+            "end_date": payload.get("end_date"),
+        }
     assumptions = IndiaTaxAssumptions(
         stcg_rate=request.stcg_rate,
         ltcg_rate=request.ltcg_rate,

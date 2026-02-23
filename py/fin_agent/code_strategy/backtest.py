@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,8 +8,8 @@ from typing import Any
 
 import duckdb
 
+from fin_agent.backtest.metrics import compute_backtest_metrics
 from fin_agent.backtest.models import BacktestArtifacts, BacktestRun
-from fin_agent.backtest.runner import _compute_metrics
 from fin_agent.code_strategy.runner import run_code_strategy_sandbox
 from fin_agent.code_strategy.validator import validate_code_strategy_source
 from fin_agent.storage import sqlite_store
@@ -81,6 +82,13 @@ def run_code_strategy_backtest(
 
     outputs = sandbox["outputs"]
     signals = outputs.get("signals", [])
+    risk_payload = outputs.get("risk", {}) if isinstance(outputs.get("risk", {}), dict) else {}
+    try:
+        risk_max_positions = int(risk_payload.get("max_positions", len(universe) or 1))
+    except (TypeError, ValueError):
+        risk_max_positions = len(universe) or 1
+    risk_max_positions = max(1, risk_max_positions)
+
     active_symbols = {
         str(item.get("symbol"))
         for item in signals
@@ -113,7 +121,7 @@ def run_code_strategy_backtest(
                 total += allocation * (close / first_close_by_symbol[symbol])
             equity_series.append(total)
 
-    metrics = _compute_metrics(equity_series, trade_count=trade_count)
+    metrics = compute_backtest_metrics(equity_series, trade_count=trade_count)
     drawdowns: list[float] = []
     peak = equity_series[0]
     for value in equity_series:
@@ -125,8 +133,70 @@ def run_code_strategy_backtest(
     temp_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     equity_path = run_dir / f"equity-{temp_id}.svg"
     drawdown_path = run_dir / f"drawdown-{temp_id}.svg"
+    trade_path = run_dir / f"trades-{temp_id}.csv"
+    signal_path = run_dir / f"signals-{temp_id}.csv"
     write_line_chart_svg(equity_path, f"Code Strategy Equity - {strategy_name}", ordered_dates, equity_series)
     write_line_chart_svg(drawdown_path, f"Code Strategy Drawdown - {strategy_name}", ordered_dates, drawdowns)
+
+    signal_rows: list[dict[str, Any]] = []
+    for symbol in sorted(by_symbol.keys()):
+        signal_item = next(
+            (item for item in signals if isinstance(item, dict) and str(item.get("symbol")) == symbol),
+            {},
+        )
+        signal_type = str(signal_item.get("signal", "watch")).lower()
+        reason_code = str(signal_item.get("reason_code", f"signal_{signal_type}"))
+        strength = signal_item.get("strength")
+        for day, close in by_symbol[symbol]:
+            signal_rows.append(
+                {
+                    "symbol": symbol,
+                    "timestamp": day,
+                    "close": close,
+                    "signal": signal_type,
+                    "strength": strength if strength is not None else "",
+                    "reason_code": reason_code,
+                }
+            )
+
+    trade_rows: list[dict[str, Any]] = []
+    for symbol in sorted(active_symbols):
+        points = by_symbol[symbol]
+        entry_ts, entry_price = points[0]
+        exit_ts, exit_price = points[-1]
+        notional = initial_capital / float(max(1, len(active_symbols)))
+        qty = 0.0 if entry_price <= 0 else notional / entry_price
+        pnl = qty * (exit_price - entry_price)
+        trade_rows.append(
+            {
+                "symbol": symbol,
+                "entry_ts": entry_ts,
+                "exit_ts": exit_ts,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl": pnl,
+                "entry_reason": "signal_buy",
+                "exit_reason": "end_of_window",
+            }
+        )
+
+    with trade_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["symbol", "entry_ts", "exit_ts", "entry_price", "exit_price", "pnl", "entry_reason", "exit_reason"],
+        )
+        writer.writeheader()
+        for row in trade_rows:
+            writer.writerow(row)
+
+    with signal_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["symbol", "timestamp", "close", "signal", "strength", "reason_code"],
+        )
+        writer.writeheader()
+        for row in signal_rows:
+            writer.writerow(row)
 
     manifest = build_world_state_manifest(paths, universe, start_date, end_date)
     run_id = sqlite_store.save_backtest_run(
@@ -134,12 +204,30 @@ def run_code_strategy_backtest(
         strategy_version_id=code_version["strategy_version_id"],
         world_manifest_id=manifest.manifest_id,
         metrics=metrics.__dict__,
-        artifacts={"equity_curve_path": str(equity_path), "drawdown_path": str(drawdown_path)},
+        artifacts={
+            "equity_curve_path": str(equity_path),
+            "drawdown_path": str(drawdown_path),
+            "trade_blotter_path": str(trade_path),
+            "signal_context_path": str(signal_path),
+        },
         payload={
             "mode": "code_strategy",
             "strategy_name": strategy_name,
             "universe": universe,
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "strategy": {
+                "strategy_name": strategy_name,
+                "universe": universe,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": initial_capital,
+                "max_positions": risk_max_positions,
+                "mode": "code_strategy",
+            },
             "signals": signals,
+            "risk": risk_payload,
             "sandbox_run_id": sandbox["run_id"],
         },
     )
@@ -162,7 +250,12 @@ def run_code_strategy_backtest(
         strategy_version_id=code_version["strategy_version_id"],
         world_manifest_id=manifest.manifest_id,
         metrics=metrics,
-        artifacts=BacktestArtifacts(equity_curve_path=str(equity_path), drawdown_path=str(drawdown_path)),
+        artifacts=BacktestArtifacts(
+            equity_curve_path=str(equity_path),
+            drawdown_path=str(drawdown_path),
+            trade_blotter_path=str(trade_path),
+            signal_context_path=str(signal_path),
+        ),
     )
     return {
         "run_id": run.run_id,

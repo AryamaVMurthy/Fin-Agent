@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fin_agent.code_strategy.backtest import run_code_strategy_backtest
 from fin_agent.code_strategy.analysis import analyze_code_strategy_run
@@ -59,12 +60,26 @@ class CodeStrategyAnalysisTests(unittest.TestCase):
                 end_date="2025-01-10",
                 initial_capital=100000.0,
             )
-
-            report = analyze_code_strategy_run(
-                paths=paths,
-                run_id=run["run_id"],
-                source_code=VALID_CODE,
-            )
+            with patch(
+                "fin_agent.code_strategy.analysis.run_agent_json_task",
+                return_value={
+                    "summary": "Agent review complete",
+                    "suggestions": [
+                        {
+                            "title": "Tighten entry threshold",
+                            "evidence": "sharpe below target and noisy entries in signal preview",
+                            "expected_impact": "Improve risk-adjusted return and reduce whipsaw trades.",
+                            "confidence": 0.78,
+                            "patch": "if momentum > 0.6: signals.append({...})",
+                        }
+                    ],
+                },
+            ):
+                report = analyze_code_strategy_run(
+                    paths=paths,
+                    run_id=run["run_id"],
+                    source_code=VALID_CODE,
+                )
 
             self.assertEqual(report["run_id"], run["run_id"])
             self.assertGreaterEqual(report["suggestion_count"], 1)

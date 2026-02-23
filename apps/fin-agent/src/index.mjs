@@ -11,6 +11,17 @@ const OPENCODE_SERVER_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD ?? "";
 const PORT = Number(process.env.PORT ?? "8090");
 const WEB_APP_PREFIX = "/app";
 const WEB_DIST = resolve(process.env.FIN_AGENT_WEB_DIST ?? "apps/fin-agent-web/dist");
+const FIN_AGENT_CHAT_SYSTEM_PROMPT = process.env.FIN_AGENT_CHAT_SYSTEM_PROMPT
+  ?? [
+    "You are Fin-Agent code-strategy compiler.",
+    "CRITICAL: natural-language strategy conversion must be fully agentic using prompts and tools.",
+    "CRITICAL: do NOT use hardcoded/manual NL-to-intent mapping endpoints for conversion.",
+    "Generate Python strategy code with required functions:",
+    "prepare(data_bundle, context), generate_signals(frame, prepared, context), risk_rules(positions, context).",
+    "Before backtest: run code_strategy_validate, preflight_custom_code, code_strategy_run_sandbox.",
+    "Then run code_strategy_backtest and summarize metrics/artifacts.",
+    "If constraints are missing, ask concise follow-up questions first.",
+  ].join("\n");
 
 function jsonResponse(status, payload) {
   return {
@@ -255,6 +266,8 @@ async function handleChatBridge(req, pathname, search, bodyBuffer) {
     }
     if (typeof payload.system === "string" && payload.system.trim()) {
       messagePayload.system = payload.system.trim();
+    } else {
+      messagePayload.system = FIN_AGENT_CHAT_SYSTEM_PROMPT;
     }
 
     const messageResult = await fetchJson(`${OPENCODE_API}/session/${encodeURIComponent(sessionId)}/message`, {

@@ -28,8 +28,7 @@ class SeedWebE2EScriptTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertIn("seed web e2e dry-run", proc.stdout)
-        self.assertIn("/v1/backtests/run", proc.stdout)
-        self.assertIn("/v1/tuning/run", proc.stdout)
+        self.assertIn("/v1/code-strategy/backtest", proc.stdout)
         self.assertIn("/v1/live/activate", proc.stdout)
 
     def test_seed_script_populates_deterministic_state(self) -> None:
@@ -90,7 +89,6 @@ class SeedWebE2EScriptTests(unittest.TestCase):
                 self.assertTrue(out_path.exists())
                 payload = json.loads(out_path.read_text(encoding="utf-8"))
                 self.assertGreaterEqual(len(payload.get("backtest_run_ids", [])), 2)
-                self.assertTrue(str(payload.get("tuning_run_id", "")).strip())
                 self.assertTrue(str(payload.get("live_strategy_version_id", "")).strip())
             finally:
                 api_proc.terminate()

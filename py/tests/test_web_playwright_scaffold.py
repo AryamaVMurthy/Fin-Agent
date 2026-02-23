@@ -19,7 +19,7 @@ class WebPlaywrightScaffoldTests(unittest.TestCase):
         self.assertIn("chat journey specs", proc.stdout)
         self.assertIn("workspace journey specs", proc.stdout)
         self.assertIn("robustness specs", proc.stdout)
-        self.assertIn("chat_warmup=1", proc.stdout)
+        self.assertIn("chat_warmup=0", proc.stdout)
         self.assertIn("optional real chat warmup request", proc.stdout)
 
     def test_playwright_config_and_spec_files_exist(self) -> None:

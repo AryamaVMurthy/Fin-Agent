@@ -1,13 +1,129 @@
 from __future__ import annotations
 
+import csv
+import json
+import os
+from pathlib import Path
 from typing import Any
 
+from fin_agent.integrations.opencode_agent import run_agent_json_task
 from fin_agent.storage import sqlite_store
 from fin_agent.storage.paths import RuntimePaths
 
 
-def _strategy_has_sell_path(source_code: str) -> bool:
-    return "\"sell\"" in source_code.lower() or "'sell'" in source_code.lower()
+SYSTEM_PROMPT = "\n".join(
+    [
+        "You are Fin-Agent Strategy Analyst.",
+        "Return ONLY a JSON object and no markdown.",
+        "Decide suggestions from provided run metrics, trade rows, signal rows, and source code.",
+        "Do not invent unavailable metrics; cite concrete evidence fields from input.",
+        "Each suggestion must include a practical code patch or pseudo-patch.",
+    ]
+)
+
+
+def _analysis_timeout_seconds() -> float:
+    raw = str(os.environ.get("FIN_AGENT_ANALYSIS_AGENT_TIMEOUT_SECONDS", "120")).strip()
+    try:
+        timeout = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"invalid FIN_AGENT_ANALYSIS_AGENT_TIMEOUT_SECONDS value: {raw}") from exc
+    if timeout <= 0:
+        raise ValueError("FIN_AGENT_ANALYSIS_AGENT_TIMEOUT_SECONDS must be positive")
+    return timeout
+
+
+def _read_csv_preview(path: str, *, limit: int = 80) -> list[dict[str, Any]]:
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise ValueError(f"analysis artifact not found: {path}")
+    rows: list[dict[str, Any]] = []
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for idx, row in enumerate(reader):
+            if idx >= limit:
+                break
+            rows.append(dict(row))
+    return rows
+
+
+def _normalize_suggestion(index: int, row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError(f"agent suggestion[{index}] must be object")
+
+    required = ("title", "evidence", "expected_impact", "confidence", "patch")
+    missing = [key for key in required if key not in row]
+    if missing:
+        raise ValueError(f"agent suggestion[{index}] missing keys: {missing}")
+
+    confidence_raw = row.get("confidence")
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"agent suggestion[{index}].confidence must be numeric") from exc
+    if confidence < 0.0 or confidence > 1.0:
+        raise ValueError(f"agent suggestion[{index}].confidence must be between 0 and 1")
+
+    title = str(row.get("title", "")).strip()
+    evidence = str(row.get("evidence", "")).strip()
+    impact = str(row.get("expected_impact", "")).strip()
+    patch = str(row.get("patch", "")).strip()
+    if not title or not evidence or not impact or not patch:
+        raise ValueError(f"agent suggestion[{index}] has empty required text fields")
+
+    normalized = {
+        "title": title,
+        "evidence": evidence,
+        "expected_impact": impact,
+        "confidence": confidence,
+        "patch": patch,
+    }
+    if "risk_notes" in row:
+        normalized["risk_notes"] = row.get("risk_notes")
+    return normalized
+
+
+def _build_analysis_prompt(
+    *,
+    run_id: str,
+    source_code: str,
+    run_payload: dict[str, Any],
+    metrics: dict[str, Any],
+    trade_preview: list[dict[str, Any]],
+    signal_preview: list[dict[str, Any]],
+    max_suggestions: int,
+) -> str:
+    input_payload = {
+        "run_id": run_id,
+        "max_suggestions": max_suggestions,
+        "metrics": metrics,
+        "run_payload": run_payload,
+        "trade_preview": trade_preview,
+        "signal_preview": signal_preview,
+        "source_code": source_code,
+    }
+    schema = {
+        "summary": "string",
+        "suggestions": [
+            {
+                "title": "string",
+                "evidence": "string",
+                "expected_impact": "string",
+                "confidence": "number between 0 and 1",
+                "patch": "string",
+                "risk_notes": "optional string",
+            }
+        ],
+    }
+    return (
+        "Analyze the following code-strategy backtest context and return actionable improvement suggestions.\n"
+        "Constraints:\n"
+        f"- Return at most {max_suggestions} suggestions.\n"
+        "- Evidence must reference concrete input details (metrics, trade rows, signal rows, code).\n"
+        "- Output MUST be a JSON object only and must match this schema shape.\n"
+        f"SCHEMA={json.dumps(schema, sort_keys=True)}\n"
+        f"INPUT={json.dumps(input_payload, sort_keys=True, default=str)}"
+    )
 
 
 def analyze_code_strategy_run(
@@ -27,90 +143,51 @@ def analyze_code_strategy_run(
         raise ValueError(f"run_id={run_id} is not a code_strategy backtest run")
 
     metrics = run.get("metrics", {})
-    suggestions: list[dict[str, Any]] = []
+    artifacts = run.get("artifacts", {})
+    trade_path = str(artifacts.get("trade_blotter_path", "")).strip()
+    signal_path = str(artifacts.get("signal_context_path", "")).strip()
+    if not trade_path or not signal_path:
+        raise ValueError("run artifacts missing trade_blotter_path/signal_context_path")
 
-    max_drawdown = float(metrics.get("max_drawdown", 0.0))
-    sharpe = float(metrics.get("sharpe", 0.0))
-    trade_count = int(metrics.get("trade_count", 0))
-    has_sell = _strategy_has_sell_path(source_code)
+    trade_preview = _read_csv_preview(trade_path, limit=80)
+    signal_preview = _read_csv_preview(signal_path, limit=120)
 
-    if max_drawdown < -0.1:
-        suggestions.append(
-            {
-                "title": "Add drawdown stop guardrail",
-                "evidence": f"run max_drawdown={max_drawdown:.6f}",
-                "expected_impact": "Reduce tail losses and improve drawdown stability.",
-                "confidence": 0.8,
-                "patch": (
-                    "def risk_rules(positions, context):\n"
-                    "    return {\"max_positions\": 1, \"max_drawdown_stop\": 0.08}"
-                ),
-            }
-        )
+    prompt = _build_analysis_prompt(
+        run_id=run_id,
+        source_code=source_code,
+        run_payload=payload,
+        metrics=metrics,
+        trade_preview=trade_preview,
+        signal_preview=signal_preview,
+        max_suggestions=max_suggestions,
+    )
 
-    if trade_count <= 2:
-        suggestions.append(
-            {
-                "title": "Increase signal opportunities",
-                "evidence": f"run trade_count={trade_count}",
-                "expected_impact": "Increase sample size so metrics are less noisy.",
-                "confidence": 0.7,
-                "patch": (
-                    "def generate_signals(frame, state, context):\n"
-                    "    # add threshold/exit conditions to avoid single-trade behavior\n"
-                    "    ...\n"
-                ),
-            }
-        )
+    response = run_agent_json_task(
+        user_prompt=prompt,
+        system_prompt=SYSTEM_PROMPT,
+        timeout_seconds=_analysis_timeout_seconds(),
+        session_title=f"Fin-Agent analyze {run_id}",
+    )
 
-    if not has_sell:
-        suggestions.append(
-            {
-                "title": "Add explicit sell path",
-                "evidence": "generate_signals source has no explicit 'sell' output",
-                "expected_impact": "Improve risk control and reduce holding-time drift.",
-                "confidence": 0.86,
-                "patch": (
-                    "if trend_reversal:\n"
-                    "    signals.append({\"symbol\": symbol, \"signal\": \"sell\", \"strength\": 0.7})"
-                ),
-            }
-        )
+    suggestions_raw = response.get("suggestions")
+    if not isinstance(suggestions_raw, list):
+        raise ValueError("agent response missing suggestions list")
+    if len(suggestions_raw) == 0:
+        raise ValueError("agent returned empty suggestions list")
 
-    if sharpe < 1.0:
-        suggestions.append(
-            {
-                "title": "Add noise filter around entry threshold",
-                "evidence": f"run sharpe={sharpe:.6f}",
-                "expected_impact": "Reduce whipsaw trades and improve risk-adjusted return.",
-                "confidence": 0.72,
-                "patch": (
-                    "if momentum > entry_threshold and volatility < vol_cap:\n"
-                    "    signals.append({\"symbol\": symbol, \"signal\": \"buy\", \"strength\": 0.8})"
-                ),
-            }
-        )
+    trimmed = suggestions_raw[:max_suggestions]
+    suggestions = [_normalize_suggestion(idx, row) for idx, row in enumerate(trimmed)]
 
-    if not suggestions:
-        suggestions.append(
-            {
-                "title": "Add parameterization hooks",
-                "evidence": "no critical failure detected, but strategy is not parameterized for tuning",
-                "expected_impact": "Makes future tuning and scenario analysis easier.",
-                "confidence": 0.55,
-                "patch": (
-                    "lookback = int(context.get('lookback', 20))\n"
-                    "threshold = float(context.get('threshold', 0.0))"
-                ),
-            }
-        )
+    summary = str(response.get("summary", "")).strip()
+    if not summary:
+        summary = "agent_analysis_completed"
 
-    trimmed = suggestions[:max_suggestions]
     return {
         "run_id": run_id,
         "metrics": metrics,
-        "suggestions": trimmed,
-        "suggestion_count": len(trimmed),
-        "mode": "patch_suggestions_only",
+        "summary": summary,
+        "suggestions": suggestions,
+        "suggestion_count": len(suggestions),
+        "mode": "agent_orchestrated",
         "auto_apply": False,
     }

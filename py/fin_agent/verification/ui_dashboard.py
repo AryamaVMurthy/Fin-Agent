@@ -7,9 +7,8 @@ from typing import Any
 
 
 _REQUIRED_HTTP_ARTIFACTS = {
-    "backtest": "backtest-run-b.json",
-    "tuning": "tuning-run.json",
-    "analysis": "analysis-deep-dive.json",
+    "backtest": "code-backtest-b.json",
+    "analysis": "code-analyze.json",
     "trade_blotter": "visualize-trade-blotter.json",
     "boundary": "visualize-boundary.json",
 }
@@ -157,11 +156,6 @@ def generate_rigorous_ui_dashboard(run_dir: Path, workspace_root: Path | None = 
         field="signal_context_path",
     )
 
-    tuning = responses["tuning"]
-    best_candidate = _require_dict(tuning, "best_candidate", context="tuning")
-    best_score = _as_float(best_candidate.get("score"), context="tuning.best_candidate", field="score")
-    sensitivity = _require_dict(tuning, "sensitivity_analysis", context="tuning")
-
     analysis = responses["analysis"]
     suggestions = _require_list(analysis, "suggestions", context="analysis")
 
@@ -177,20 +171,17 @@ def generate_rigorous_ui_dashboard(run_dir: Path, workspace_root: Path | None = 
         field="boundary_chart_path",
     )
 
-    sensitivity_rows: list[list[Any]] = []
-    for parameter in sorted(sensitivity.keys()):
-        details = sensitivity[parameter]
-        if not isinstance(details, dict):
-            raise ValueError(f"tuning.sensitivity_analysis.{parameter} must be an object")
-        sensitivity_rows.append(
-            [
-                parameter,
-                details.get("status", "-"),
-                details.get("baseline_value", "-"),
-                details.get("alternative_value", "-"),
-                details.get("score_delta", "-"),
-            ]
-        )
+    diagnostics_rows: list[list[Any]] = [
+        ["mode", "code_strategy", "-", "-", "-"],
+        ["signals_count", backtest.get("signals_count", "-"), "-", "-", "-"],
+        [
+            "preflight_estimated_seconds",
+            _require_dict(backtest, "preflight", context="backtest").get("estimated_seconds", "-"),
+            "-",
+            "-",
+            "-",
+        ],
+    ]
 
     suggestion_rows: list[list[Any]] = []
     for suggestion in suggestions:
@@ -226,11 +217,11 @@ def generate_rigorous_ui_dashboard(run_dir: Path, workspace_root: Path | None = 
         "Max Drawdown": _as_float(backtest_metrics.get("max_drawdown"), context="backtest.metrics", field="max_drawdown"),
         "CAGR": _as_float(backtest_metrics.get("cagr"), context="backtest.metrics", field="cagr"),
         "Trade Count": int(_as_float(backtest_metrics.get("trade_count"), context="backtest.metrics", field="trade_count")),
-        "Tuning Best Score": best_score,
+        "Signals Count": int(_as_float(backtest.get("signals_count", 0), context="backtest", field="signals_count")),
     }
 
-    sensitivity_table = _render_responsive_table(
-        ["Parameter", "Status", "Baseline", "Alternative", "Delta"], sensitivity_rows
+    diagnostics_table = _render_responsive_table(
+        ["Parameter", "Status", "Baseline", "Alternative", "Delta"], diagnostics_rows
     )
     suggestions_table = _render_responsive_table(
         ["Title", "Evidence", "Confidence", "Expected Impact"], suggestion_rows
@@ -313,7 +304,7 @@ body {{ margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Cons
     <div class="card"><h2>Max Drawdown</h2><div class="val {'warn' if metrics['Max Drawdown'] < 0 else ''}">{escape(f"{metrics['Max Drawdown']:.4f}")}</div></div>
     <div class="card"><h2>CAGR</h2><div class="val {'warn' if metrics['CAGR'] < 0 else ''}">{escape(f"{metrics['CAGR']:.4f}")}</div></div>
     <div class="card"><h2>Trade Count</h2><div class="val">{escape(str(metrics['Trade Count']))}</div></div>
-    <div class="card"><h2>Tuning Best Score</h2><div class="val">{escape(f"{metrics['Tuning Best Score']:.4f}")}</div></div>
+    <div class="card"><h2>Signals Count</h2><div class="val">{escape(str(metrics['Signals Count']))}</div></div>
   </div>
 
   <div class="section">
@@ -338,9 +329,9 @@ body {{ margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Cons
   </div>
 
   <div class="section">
-    <h3>Tuning Sensitivity</h3>
+    <h3>Agentic Diagnostics</h3>
     <div class="content">
-      {sensitivity_table}
+      {diagnostics_table}
     </div>
   </div>
 

@@ -41,10 +41,12 @@ class RigorousUIDashboardTests(unittest.TestCase):
                 },
             )
             self._write_json(
-                http_dir / "014-backtest-run-b.json",
+                http_dir / "014-code-backtest-b.json",
                 {
                     "response": {
                         "strategy_version_id": "sv-1",
+                        "signals_count": 2,
+                        "preflight": {"estimated_seconds": 0.42},
                         "metrics": {
                             "final_equity": 1000.0,
                             "sharpe": 1.2,
@@ -62,23 +64,7 @@ class RigorousUIDashboardTests(unittest.TestCase):
                 },
             )
             self._write_json(
-                http_dir / "018-tuning-run.json",
-                {
-                    "response": {
-                        "best_candidate": {"score": 1.55},
-                        "sensitivity_analysis": {
-                            "short_window": {
-                                "status": "ok",
-                                "baseline_value": 5,
-                                "alternative_value": 8,
-                                "score_delta": 0.12,
-                            }
-                        },
-                    }
-                },
-            )
-            self._write_json(
-                http_dir / "019-analysis-deep-dive.json",
+                http_dir / "019-code-analyze.json",
                 {
                     "response": {
                         "suggestions": [
@@ -149,7 +135,7 @@ class RigorousUIDashboardTests(unittest.TestCase):
                     "steps": [],
                 },
             )
-            self._write_json(http_dir / "014-backtest-run-b.json", {"response": {}})
+            self._write_json(http_dir / "014-code-backtest-b.json", {"response": {}})
 
             with self.assertRaisesRegex(ValueError, "missing required HTTP artifact"):
                 generate_rigorous_ui_dashboard(run_dir=run_dir, workspace_root=root)

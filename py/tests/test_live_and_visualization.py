@@ -9,6 +9,18 @@ from fin_agent.api import app as app_module
 from fin_agent.storage.paths import RuntimePaths
 
 
+VALID_CODE = """
+def prepare(data_bundle, context):
+    return {"prepared": True}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.61, "reason_code": "signal_buy_live"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+
 class LiveAndVisualizationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -32,19 +44,19 @@ class LiveAndVisualizationTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        intent = app_module.IntentSnapshot(
-            universe=["ABC"],
-            start_date="2025-01-01",
-            end_date="2025-01-10",
-            initial_capital=100000.0,
-            short_window=2,
-            long_window=4,
-            max_positions=1,
-        )
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
             app_module.startup()
             app_module.import_data(app_module.ImportRequest(path=str(csv_path)))
-            run_payload = app_module.backtest_run(app_module.BacktestRequest(strategy_name="LiveViz", intent=intent))
+            run_payload = app_module.code_strategy_backtest(
+                app_module.CodeStrategyBacktestRequest(
+                    strategy_name="LiveViz",
+                    source_code=VALID_CODE,
+                    universe=["ABC"],
+                    start_date="2025-01-01",
+                    end_date="2025-01-10",
+                    initial_capital=100000.0,
+                )
+            )
         self.run_id = run_payload["run_id"]
         self.strategy_version_id = run_payload["strategy_version_id"]
 

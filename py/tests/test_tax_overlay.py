@@ -8,6 +8,18 @@ from fin_agent.api import app as app_module
 from fin_agent.storage.paths import RuntimePaths
 
 
+VALID_CODE = """
+def prepare(data_bundle, context):
+    return {"prepared": True}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.59, "reason_code": "signal_buy_tax"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+
 class TaxOverlayTests(unittest.TestCase):
     def test_tax_report_endpoint_returns_pre_and_post_tax(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -36,18 +48,14 @@ class TaxOverlayTests(unittest.TestCase):
 
             with patch.object(app_module, "_runtime_paths", return_value=paths):
                 app_module.import_data(app_module.ImportRequest(path=str(csv_path)))
-                run = app_module.backtest_run(
-                    app_module.BacktestRequest(
+                run = app_module.code_strategy_backtest(
+                    app_module.CodeStrategyBacktestRequest(
                         strategy_name="Tax Test",
-                        intent=app_module.IntentSnapshot(
-                            universe=["ABC"],
-                            start_date="2025-01-01",
-                            end_date="2025-01-08",
-                            initial_capital=100000,
-                            short_window=2,
-                            long_window=4,
-                            max_positions=1,
-                        ),
+                        source_code=VALID_CODE,
+                        universe=["ABC"],
+                        start_date="2025-01-01",
+                        end_date="2025-01-08",
+                        initial_capital=100000.0,
                     )
                 )
                 report = app_module.backtest_tax_report(

@@ -40,7 +40,10 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn(f"fin-agent-tui-{version}/LICENSE", names)
         self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent/src/cli.mjs", names)
         self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent-web/dist/index.html", names)
-        self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent-web/dist/assets/app.js", names)
+        self.assertTrue(
+            any(name.startswith(f"fin-agent-tui-{version}/apps/fin-agent-web/dist/assets/") and name.endswith(".js") for name in names),
+            "expected at least one compiled JS asset in release archive",
+        )
         self.assertIn(f"fin-agent-tui-{version}/docs/runbooks/publish-stage1.md", names)
 
 

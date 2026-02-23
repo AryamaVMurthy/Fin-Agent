@@ -3,7 +3,6 @@ from __future__ import annotations
 import duckdb
 
 from fin_agent.storage.paths import RuntimePaths
-from fin_agent.strategy.models import IntentSnapshot
 
 
 def _count_market_rows(paths: RuntimePaths, universe: list[str], start_date: str, end_date: str) -> int:
@@ -21,11 +20,6 @@ def _count_market_rows(paths: RuntimePaths, universe: list[str], start_date: str
     if row_count <= 0:
         raise ValueError("preflight failed: no rows available for requested range")
     return row_count
-
-
-def estimate_backtest_runtime_seconds(paths: RuntimePaths, intent: IntentSnapshot) -> float:
-    row_count = _count_market_rows(paths, intent.universe, intent.start_date, intent.end_date)
-    return row_count * 0.0002
 
 
 def estimate_world_state_runtime_seconds(
@@ -122,18 +116,3 @@ def enforce_custom_code_budget(
         "max_allowed_seconds": max_estimated_seconds,
     }
 
-
-def enforce_backtest_budget(paths: RuntimePaths, intent: IntentSnapshot, max_estimated_seconds: float) -> dict[str, float]:
-    if max_estimated_seconds <= 0:
-        raise ValueError("max_estimated_seconds must be positive")
-    estimate_seconds = estimate_backtest_runtime_seconds(paths, intent)
-    if estimate_seconds > max_estimated_seconds:
-        raise ValueError(
-            f"preflight budget exceeded: estimated_seconds={estimate_seconds:.2f}, "
-            f"max_allowed_seconds={max_estimated_seconds:.2f}. "
-            "Reduce universe size, shorten date range, or increase granularity."
-        )
-    return {
-        "estimated_seconds": estimate_seconds,
-        "max_allowed_seconds": max_estimated_seconds,
-    }

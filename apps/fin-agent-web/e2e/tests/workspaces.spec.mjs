@@ -25,9 +25,14 @@ test('workspace journeys cover backtests, tuning, live, and diagnostics', async 
   await page.locator('[data-workspace-target="workspace-tuning"]').click();
   await expect(page.locator('#workspace-tuning')).toBeVisible();
   const firstTuningView = page.locator('#tuning-body [data-view-tuning]').first();
-  await expect(firstTuningView).toBeVisible({ timeout: 15000 });
-  await firstTuningView.click();
-  await expect(page.locator('#tuning-detail')).toContainText(/Tuning|Trials|Layers/i, { timeout: 15000 });
+  const tuningButtons = await page.locator('#tuning-body [data-view-tuning]').count();
+  if (tuningButtons > 0) {
+    await expect(firstTuningView).toBeVisible({ timeout: 15000 });
+    await firstTuningView.click();
+    await expect(page.locator('#tuning-detail')).toContainText(/Tuning|Trials|Layers/i, { timeout: 15000 });
+  } else {
+    await expect(page.locator('#tuning-body')).toContainText(/No tuning runs/i, { timeout: 15000 });
+  }
 
   // Live
   await page.locator('[data-workspace-target="workspace-live"]').click();

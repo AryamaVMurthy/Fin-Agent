@@ -105,8 +105,8 @@ require_doctor=${REQUIRE_DOCTOR}
 runtime_home=${RUNTIME_HOME:-"(output_dir/runtime)"}
 gates:
   - service startup + health parity
-  - deterministic data imports + intent/strategy/world-state
-  - backtest compare + tuning derive/run + analysis
+  - deterministic data imports + code-strategy/world-state
+  - backtest compare + code-strategy analysis
   - code strategy lane + visualizations + live lifecycle
   - tax + session memory + diagnostics/observability
   - wrapper parity checks
@@ -313,7 +313,7 @@ def _http_json(method: str, base_url: str, path: str, payload: dict[str, Any] | 
         body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=180) as response:
             status = int(response.getcode())
             data = json.loads(response.read().decode("utf-8"))
             return status, data
@@ -428,35 +428,6 @@ def core_flow() -> None:
         payload={"path": str(DATA_DIR / "ratings.csv")},
     )
 
-    propose = call(
-        "brainstorm-propose",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/brainstorm/agent-decides/propose",
-        payload={"universe": ["ABC"], "start_date": "2025-01-01", "end_date": "2025-01-10"},
-    )
-    context["intent"] = propose["proposed_intent"]
-    confirm = call(
-        "brainstorm-confirm",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/brainstorm/agent-decides/confirm",
-        payload={
-            "intent": context["intent"],
-            "decision_card": propose["decision_card"],
-        },
-    )
-    context["intent_snapshot_id"] = confirm["intent_snapshot_id"]
-
-    strategy = call(
-        "strategy-from-intent",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/strategy/from-intent",
-        payload={"strategy_name": "Rigorous Base", "intent_snapshot_id": context["intent_snapshot_id"]},
-    )
-    context["strategy_version_id"] = strategy["strategy_version_id"]
-
     completeness = call(
         "world-completeness",
         method="POST",
@@ -484,36 +455,128 @@ def core_flow() -> None:
     )
     _assert(bool(pit.get("valid", False)), f"pit validation failed: {pit}")
 
-    call(
-        "preflight-backtest",
+    strategy_code_a = """
+def prepare(data_bundle, context):
+    return {"variant": "a"}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.62, "reason_code": "signal_buy_a"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+    strategy_code_b = """
+def prepare(data_bundle, context):
+    return {"variant": "b"}
+
+def generate_signals(frame, state, context):
+    return [{"symbol": "ABC", "signal": "buy", "strength": 0.54, "reason_code": "signal_buy_b"}]
+
+def risk_rules(positions, context):
+    return {"max_positions": 1}
+"""
+
+    preflight_a = call(
+        "code-preflight-a",
         method="POST",
         base_url=API_BASE,
-        path="/v1/preflight/backtest",
+        path="/v1/preflight/custom-code",
         payload={
-            "strategy_name": "Rigorous A",
-            "intent_snapshot_id": context["intent_snapshot_id"],
+            "universe": ["ABC"],
+            "start_date": "2025-01-01",
+            "end_date": "2025-01-10",
+            "complexity_multiplier": 1.0,
             "max_allowed_seconds": 120.0,
         },
     )
-
-    run_one = call(
-        "backtest-run-a",
+    _assert(float(preflight_a["estimated_seconds"]) > 0, "code preflight estimated_seconds must be positive")
+    validation_a = call(
+        "code-validate-a",
         method="POST",
         base_url=API_BASE,
-        path="/v1/backtests/run",
+        path="/v1/code-strategy/validate",
+        payload={"strategy_name": "Rigorous Code A", "source_code": strategy_code_a},
+    )
+    _assert(bool(validation_a["validation"]["valid"]), "code strategy A validation expected valid=true")
+    sandbox_a = call(
+        "code-sandbox-a",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/run-sandbox",
+        payload={"source_code": strategy_code_a, "timeout_seconds": 3, "memory_mb": 128, "cpu_seconds": 1},
+    )
+    _assert(str(sandbox_a.get("status")) == "completed", "sandbox A expected completed status")
+    call(
+        "code-save-a",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/save",
+        payload={"strategy_name": "Rigorous Code A", "source_code": strategy_code_a},
+    )
+    run_one = call(
+        "code-backtest-a",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/backtest",
         payload={
-            "strategy_name": "Rigorous A",
-            "intent": {**context["intent"], "short_window": 2, "long_window": 4, "max_positions": 1},
+            "strategy_name": "Rigorous Code A",
+            "source_code": strategy_code_a,
+            "universe": ["ABC"],
+            "start_date": "2025-01-01",
+            "end_date": "2025-01-10",
+            "initial_capital": 100000.0,
         },
     )
-    run_two = call(
-        "backtest-run-b",
+
+    preflight_b = call(
+        "code-preflight-b",
         method="POST",
         base_url=API_BASE,
-        path="/v1/backtests/run",
+        path="/v1/preflight/custom-code",
         payload={
-            "strategy_name": "Rigorous B",
-            "intent": {**context["intent"], "short_window": 3, "long_window": 5, "max_positions": 1},
+            "universe": ["ABC"],
+            "start_date": "2025-01-01",
+            "end_date": "2025-01-10",
+            "complexity_multiplier": 1.0,
+            "max_allowed_seconds": 120.0,
+        },
+    )
+    _assert(float(preflight_b["estimated_seconds"]) > 0, "code preflight estimated_seconds must be positive")
+    validation_b = call(
+        "code-validate-b",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/validate",
+        payload={"strategy_name": "Rigorous Code B", "source_code": strategy_code_b},
+    )
+    _assert(bool(validation_b["validation"]["valid"]), "code strategy B validation expected valid=true")
+    sandbox_b = call(
+        "code-sandbox-b",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/run-sandbox",
+        payload={"source_code": strategy_code_b, "timeout_seconds": 3, "memory_mb": 128, "cpu_seconds": 1},
+    )
+    _assert(str(sandbox_b.get("status")) == "completed", "sandbox B expected completed status")
+    call(
+        "code-save-b",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/save",
+        payload={"strategy_name": "Rigorous Code B", "source_code": strategy_code_b},
+    )
+    run_two = call(
+        "code-backtest-b",
+        method="POST",
+        base_url=API_BASE,
+        path="/v1/code-strategy/backtest",
+        payload={
+            "strategy_name": "Rigorous Code B",
+            "source_code": strategy_code_b,
+            "universe": ["ABC"],
+            "start_date": "2025-01-01",
+            "end_date": "2025-01-10",
+            "initial_capital": 100000.0,
         },
     )
     context["run_one_id"] = run_one["run_id"]
@@ -529,54 +592,6 @@ def core_flow() -> None:
     )
     _assert("metrics_delta" in compare, "compare response missing metrics_delta")
 
-    call(
-        "preflight-tuning",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/preflight/tuning",
-        payload={"num_trials": 6, "per_trial_estimated_seconds": 0.5, "max_allowed_seconds": 120.0},
-    )
-
-    tuning_space = call(
-        "tuning-derive",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/tuning/search-space/derive",
-        payload={
-            "strategy_name": "Rigorous Tune",
-            "intent": {**context["intent"], "short_window": 2, "long_window": 4, "max_positions": 1},
-            "optimization_target": "sharpe",
-            "risk_mode": "balanced",
-            "policy_mode": "user_selected",
-            "include_layers": ["signal", "execution"],
-        },
-    )
-    _assert("tuning_plan" in tuning_space and "graph" in tuning_space["tuning_plan"], "tuning derive missing plan graph")
-
-    tuning_run = call(
-        "tuning-run",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/tuning/run",
-        payload={
-            "strategy_name": "Rigorous Tune",
-            "intent": {**context["intent"], "short_window": 2, "long_window": 4, "max_positions": 1},
-            "optimization_target": "sharpe",
-            "risk_mode": "balanced",
-            "policy_mode": "user_selected",
-            "include_layers": ["signal", "execution"],
-            "max_trials": 6,
-        },
-    )
-    _assert("sensitivity_analysis" in tuning_run, "tuning run missing sensitivity_analysis")
-
-    call(
-        "analysis-deep-dive",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/analysis/deep-dive",
-        payload={"run_id": context["run_two_id"]},
-    )
     blotter = call(
         "visualize-trade-blotter",
         method="POST",
@@ -637,60 +652,15 @@ def core_flow() -> None:
     )
     _assert(str(stop.get("status")) == "stopped", "live stop failed")
 
-    strategy_code = """
-def prepare(data_bundle, context):
-    return {"ok": True}
-
-def generate_signals(frame, state, context):
-    return [{"symbol": "ABC", "signal": "buy"}]
-
-def risk_rules(positions, context):
-    return {"max_positions": 1}
-"""
-    validation = call(
-        "code-validate",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/code-strategy/validate",
-        payload={"strategy_name": "Rigorous Code", "source_code": strategy_code},
-    )
-    _assert(bool(validation["validation"]["valid"]), "code strategy validation expected valid=true")
-    call(
-        "code-save",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/code-strategy/save",
-        payload={"strategy_name": "Rigorous Code", "source_code": strategy_code},
-    )
-    sandbox = call(
-        "code-sandbox",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/code-strategy/run-sandbox",
-        payload={"source_code": strategy_code, "timeout_seconds": 3, "memory_mb": 128, "cpu_seconds": 1},
-    )
-    _assert(str(sandbox.get("status")) == "completed", "sandbox run expected completed status")
-    code_backtest = call(
-        "code-backtest",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/code-strategy/backtest",
-        payload={
-            "strategy_name": "Rigorous Code",
-            "source_code": strategy_code,
-            "universe": ["ABC"],
-            "start_date": "2025-01-01",
-            "end_date": "2025-01-10",
-            "initial_capital": 100000.0,
-        },
-    )
-    call(
-        "code-analyze",
-        method="POST",
-        base_url=API_BASE,
-        path="/v1/code-strategy/analyze",
-        payload={"run_id": code_backtest["run_id"], "source_code": strategy_code},
-    )
+    if WITH_OPENCODE:
+        code_analysis = call(
+            "code-analyze",
+            method="POST",
+            base_url=API_BASE,
+            path="/v1/code-strategy/analyze",
+            payload={"run_id": context["run_two_id"], "source_code": strategy_code_b},
+        )
+        _assert(int(code_analysis.get("suggestion_count", 0)) >= 1, "code analysis expected suggestions")
 
     tax = call(
         "backtest-tax-report",
@@ -708,7 +678,7 @@ def risk_rules(positions, context):
         path="/v1/context/delta",
         payload={
             "session_id": "rigorous",
-            "tool_name": "manual.check",
+            "tool_name": "agent.check",
             "tool_input": {"k": 1},
             "tool_output": {"v": 2},
         },
@@ -936,10 +906,14 @@ try:
     with (OUTPUT_DIR / "artifacts" / "steps.jsonl").open("w", encoding="utf-8") as handle:
         for step in steps:
             handle.write(json.dumps(step.__dict__, sort_keys=True) + "\n")
-    ui_payload = generate_rigorous_ui_dashboard(run_dir=OUTPUT_DIR, workspace_root=Path.cwd())
+    if WITH_OPENCODE:
+        ui_payload = generate_rigorous_ui_dashboard(run_dir=OUTPUT_DIR, workspace_root=Path.cwd())
+        ui_dashboard_path = ui_payload["paths"]["dashboard"]
+    else:
+        ui_dashboard_path = "skipped (requires --with-opencode to generate code-analysis artifact)"
     print(f"rigorous e2e: passed")
     print(f"summary={OUTPUT_DIR / 'artifacts' / 'summary.json'}")
-    print(f"ui_dashboard={ui_payload['paths']['dashboard']}")
+    print(f"ui_dashboard={ui_dashboard_path}")
 except Exception as exc:  # noqa: BLE001
     summary = {
         "status": "failed",

@@ -17,7 +17,7 @@ export const FinAgentOrchestratorPlugin: Plugin = async () => {
 
   return {
     "tool.execute.before": async (input, output) => {
-      if (!input.tool.startsWith("kite.") && !input.tool.startsWith("screener.")) {
+      if (!input.tool.startsWith("kite_") && !input.tool.startsWith("screener_")) {
         return
       }
       output.args = {
@@ -25,7 +25,7 @@ export const FinAgentOrchestratorPlugin: Plugin = async () => {
       }
     },
     "tool.execute.after": async (input) => {
-      if (input.tool.startsWith("kite.") || input.tool.startsWith("screener.")) {
+      if (input.tool.startsWith("kite_") || input.tool.startsWith("screener_")) {
         console.log(`[finagent-tool] executed tool=${input.tool}`)
       }
     },

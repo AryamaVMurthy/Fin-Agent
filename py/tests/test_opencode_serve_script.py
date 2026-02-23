@@ -64,6 +64,9 @@ class OpenCodeServeScriptTests(unittest.TestCase):
             self.assertEqual(payload.get("model"), "openai/gpt-5.2-codex")
             self.assertIn("oh-my-opencode", payload.get("plugin", []))
             self.assertIn("opencode-beads", payload.get("plugin", []))
+            plugin_entries = payload.get("plugin", [])
+            self.assertTrue(any(str(item).endswith("/.opencode/plugins/finagent-orchestrator.ts") for item in plugin_entries))
+            self.assertTrue(any(str(item).endswith("/.opencode/tools/finagent-tools.ts") for item in plugin_entries))
 
     def test_opencode_serve_can_use_global_config_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -52,29 +52,10 @@ function queryString(params: Record<string, unknown>): string {
   return encoded.length > 0 ? `?${encoded}` : ""
 }
 
-function parseOptionalJsonObject(input: unknown, fieldName: string): Record<string, unknown> | undefined {
-  if (input === undefined || input === null) {
-    return undefined
-  }
-  if (typeof input !== "string") {
-    throw new Error(`${fieldName} must be a JSON object string`)
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(input)
-  } catch (error) {
-    throw new Error(`${fieldName} is not valid JSON: ${String(error)}`)
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`${fieldName} must decode to a JSON object`)
-  }
-  return parsed as Record<string, unknown>
-}
-
 export const FinAgentToolsPlugin: Plugin = async () => {
   return {
     tool: {
-      "kite.candles.fetch": tool({
+      "kite_candles_fetch": tool({
         description: "Fetch and optionally persist candle data from Kite",
         args: {
           symbol: tool.schema.string(),
@@ -87,7 +68,7 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           force_refresh: tool.schema.boolean().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("kite.candles.fetch", args as Record<string, unknown>, async () => postJson("/v1/kite/candles/fetch", {
+          return await trackedToolExecute("kite_candles_fetch", args as Record<string, unknown>, async () => postJson("/v1/kite/candles/fetch", {
             ...args,
             persist: args.persist ?? true,
             use_cache: args.use_cache ?? true,
@@ -95,29 +76,29 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           }))
         },
       }),
-      "kite.instruments.sync": tool({
+      "kite_instruments_sync": tool({
         description: "Sync Kite instrument master into local analytics store",
         args: {
           exchange: tool.schema.string().optional(),
           max_rows: tool.schema.number().int().positive().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("kite.instruments.sync", args as Record<string, unknown>, async () => postJson("/v1/kite/instruments/sync", {
+          return await trackedToolExecute("kite_instruments_sync", args as Record<string, unknown>, async () => postJson("/v1/kite/instruments/sync", {
             exchange: args.exchange ?? null,
             max_rows: args.max_rows ?? 20000,
           }))
         },
       }),
-      "screener.formula.validate": tool({
+      "screener_formula_validate": tool({
         description: "Validate custom screener formula",
         args: {
           formula: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("screener.formula.validate", args as Record<string, unknown>, async () => postJson("/v1/screener/formula/validate", args))
+          return await trackedToolExecute("screener_formula_validate", args as Record<string, unknown>, async () => postJson("/v1/screener/formula/validate", args))
         },
       }),
-      "screener.run": tool({
+      "screener_run": tool({
         description: "Run custom screener formula against latest market snapshot",
         args: {
           formula: tool.schema.string(),
@@ -128,23 +109,23 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           sort_order: tool.schema.string().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("screener.run", args as Record<string, unknown>, async () => postJson("/v1/screener/run", {
+          return await trackedToolExecute("screener_run", args as Record<string, unknown>, async () => postJson("/v1/screener/run", {
             ...args,
             top_k: args.top_k ?? 50,
             sort_order: args.sort_order ?? "desc",
           }))
         },
       }),
-      "session.diff": tool({
+      "session_diff": tool({
         description: "Compare the latest two session snapshots and return state changes",
         args: {
           session_id: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("session.diff", args as Record<string, unknown>, async () => getJson(`/v1/session/diff${queryString({ session_id: args.session_id })}`))
+          return await trackedToolExecute("session_diff", args as Record<string, unknown>, async () => getJson(`/v1/session/diff${queryString({ session_id: args.session_id })}`))
         },
       }),
-      "world-state.build": tool({
+      "world_state_build": tool({
         description: "Build point-in-time world state manifest",
         args: {
           universe: tool.schema.array(tool.schema.string()),
@@ -153,13 +134,13 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           adjustment_policy: tool.schema.string().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("world-state.build", args as Record<string, unknown>, async () => postJson("/v1/world-state/build", {
+          return await trackedToolExecute("world_state_build", args as Record<string, unknown>, async () => postJson("/v1/world-state/build", {
             ...args,
             adjustment_policy: args.adjustment_policy ?? "none",
           }))
         },
       }),
-      "world-state.validate": tool({
+      "world_state_validate": tool({
         description: "Validate PIT world state for leakage/completeness",
         args: {
           universe: tool.schema.array(tool.schema.string()),
@@ -169,150 +150,156 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           adjustment_policy: tool.schema.string().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("world-state.validate", args as Record<string, unknown>, async () => postJson("/v1/world-state/validate-pit", {
+          return await trackedToolExecute("world_state_validate", args as Record<string, unknown>, async () => postJson("/v1/world-state/validate-pit", {
             ...args,
             strict_mode: args.strict_mode ?? true,
             adjustment_policy: args.adjustment_policy ?? "none",
           }))
         },
       }),
-      "strategy.from-intent": tool({
-        description: "Create a strategy version from a saved intent snapshot",
+      "code_strategy_validate": tool({
+        description: "Validate agent-generated Python strategy source against required contract",
         args: {
-          strategy_name: tool.schema.string(),
-          intent_snapshot_id: tool.schema.string(),
+          strategy_name: tool.schema.string().optional(),
+          source_code: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("strategy.from-intent", args as Record<string, unknown>, async () => postJson("/v1/strategy/from-intent", args))
+          return await trackedToolExecute("code_strategy_validate", args as Record<string, unknown>, async () => postJson("/v1/code-strategy/validate", {
+            strategy_name: args.strategy_name ?? null,
+            source_code: args.source_code,
+          }))
         },
       }),
-      "backtest.run": tool({
-        description: "Run deterministic backtest from strategy name + intent snapshot",
+      "code_strategy_save": tool({
+        description: "Save validated agent-generated Python strategy source as a versioned strategy",
         args: {
           strategy_name: tool.schema.string(),
-          intent_snapshot_id: tool.schema.string(),
+          source_code: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("backtest.run", args as Record<string, unknown>, async () => postJson("/v1/backtests/run", args))
+          return await trackedToolExecute("code_strategy_save", args as Record<string, unknown>, async () => postJson("/v1/code-strategy/save", args))
         },
       }),
-      "backtest.compare": tool({
+      "code_strategy_run_sandbox": tool({
+        description: "Execute Python strategy source in sandbox for contract/runtime verification",
+        args: {
+          source_code: tool.schema.string(),
+          timeout_seconds: tool.schema.number().int().positive().optional(),
+          memory_mb: tool.schema.number().int().positive().optional(),
+          cpu_seconds: tool.schema.number().int().positive().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("code_strategy_run_sandbox", args as Record<string, unknown>, async () => postJson("/v1/code-strategy/run-sandbox", {
+            source_code: args.source_code,
+            timeout_seconds: args.timeout_seconds ?? 5,
+            memory_mb: args.memory_mb ?? 256,
+            cpu_seconds: args.cpu_seconds ?? 2,
+          }))
+        },
+      }),
+      "code_strategy_backtest": tool({
+        description: "Backtest an agent-generated Python strategy source end-to-end",
+        args: {
+          strategy_name: tool.schema.string(),
+          source_code: tool.schema.string(),
+          universe: tool.schema.array(tool.schema.string()),
+          start_date: tool.schema.string(),
+          end_date: tool.schema.string(),
+          initial_capital: tool.schema.number().positive(),
+          timeout_seconds: tool.schema.number().int().positive().optional(),
+          memory_mb: tool.schema.number().int().positive().optional(),
+          cpu_seconds: tool.schema.number().int().positive().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("code_strategy_backtest", args as Record<string, unknown>, async () => postJson("/v1/code-strategy/backtest", {
+            strategy_name: args.strategy_name,
+            source_code: args.source_code,
+            universe: args.universe,
+            start_date: args.start_date,
+            end_date: args.end_date,
+            initial_capital: args.initial_capital,
+            timeout_seconds: args.timeout_seconds ?? 5,
+            memory_mb: args.memory_mb ?? 256,
+            cpu_seconds: args.cpu_seconds ?? 2,
+          }))
+        },
+      }),
+      "code_strategy_analyze": tool({
+        description: "Analyze a completed code-strategy backtest and return patch suggestions",
+        args: {
+          run_id: tool.schema.string(),
+          source_code: tool.schema.string(),
+          max_suggestions: tool.schema.number().int().positive().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("code_strategy_analyze", args as Record<string, unknown>, async () => postJson("/v1/code-strategy/analyze", {
+            run_id: args.run_id,
+            source_code: args.source_code,
+            max_suggestions: args.max_suggestions ?? 5,
+          }))
+        },
+      }),
+      "preflight_custom_code": tool({
+        description: "Estimate and enforce runtime budget for code-strategy backtests",
+        args: {
+          universe: tool.schema.array(tool.schema.string()),
+          start_date: tool.schema.string(),
+          end_date: tool.schema.string(),
+          complexity_multiplier: tool.schema.number().positive().optional(),
+          max_allowed_seconds: tool.schema.number().positive().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("preflight_custom_code", args as Record<string, unknown>, async () => postJson("/v1/preflight/custom-code", {
+            universe: args.universe,
+            start_date: args.start_date,
+            end_date: args.end_date,
+            complexity_multiplier: args.complexity_multiplier ?? 1.0,
+            max_allowed_seconds: args.max_allowed_seconds ?? 30.0,
+          }))
+        },
+      }),
+      "backtest_compare": tool({
         description: "Compare baseline and candidate backtest runs",
         args: {
           baseline_run_id: tool.schema.string(),
           candidate_run_id: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("backtest.compare", args as Record<string, unknown>, async () => postJson("/v1/backtests/compare", args))
+          return await trackedToolExecute("backtest_compare", args as Record<string, unknown>, async () => postJson("/v1/backtests/compare", args))
         },
       }),
-      "tuning.search-space.derive": tool({
-        description: "Derive policy-driven tuning search space, layer plan, and dependency graph",
-        args: {
-          strategy_name: tool.schema.string(),
-          intent_snapshot_id: tool.schema.string(),
-          optimization_target: tool.schema.string().optional(),
-          risk_mode: tool.schema.string().optional(),
-          policy_mode: tool.schema.string().optional(),
-          include_layers: tool.schema.array(tool.schema.string()).optional(),
-          freeze_params_json: tool.schema.string().optional(),
-          search_space_overrides_json: tool.schema.string().optional(),
-          max_drawdown_limit: tool.schema.number().positive().optional(),
-          turnover_cap: tool.schema.number().int().positive().optional(),
-        },
-        async execute(args) {
-          const freezeParams = parseOptionalJsonObject(args.freeze_params_json, "freeze_params_json")
-          const searchSpaceOverrides = parseOptionalJsonObject(args.search_space_overrides_json, "search_space_overrides_json")
-          return await trackedToolExecute("tuning.search-space.derive", args as Record<string, unknown>, async () => postJson("/v1/tuning/search-space/derive", {
-            strategy_name: args.strategy_name,
-            intent_snapshot_id: args.intent_snapshot_id,
-            optimization_target: args.optimization_target ?? "sharpe",
-            risk_mode: args.risk_mode ?? "balanced",
-            policy_mode: args.policy_mode ?? "agent_decides",
-            include_layers: args.include_layers,
-            freeze_params: freezeParams,
-            search_space_overrides: searchSpaceOverrides,
-            max_drawdown_limit: args.max_drawdown_limit,
-            turnover_cap: args.turnover_cap,
-          }))
-        },
-      }),
-      "tuning.run": tool({
-        description: "Run policy-driven hyperparameter tuning with sensitivity analysis output",
-        args: {
-          strategy_name: tool.schema.string(),
-          intent_snapshot_id: tool.schema.string(),
-          optimization_target: tool.schema.string().optional(),
-          risk_mode: tool.schema.string().optional(),
-          policy_mode: tool.schema.string().optional(),
-          include_layers: tool.schema.array(tool.schema.string()).optional(),
-          freeze_params_json: tool.schema.string().optional(),
-          search_space_overrides_json: tool.schema.string().optional(),
-          max_drawdown_limit: tool.schema.number().positive().optional(),
-          turnover_cap: tool.schema.number().int().positive().optional(),
-          max_trials: tool.schema.number().int().positive().optional(),
-          per_trial_estimated_seconds: tool.schema.number().positive().optional(),
-        },
-        async execute(args) {
-          const freezeParams = parseOptionalJsonObject(args.freeze_params_json, "freeze_params_json")
-          const searchSpaceOverrides = parseOptionalJsonObject(args.search_space_overrides_json, "search_space_overrides_json")
-          return await trackedToolExecute("tuning.run", args as Record<string, unknown>, async () => postJson("/v1/tuning/run", {
-            strategy_name: args.strategy_name,
-            intent_snapshot_id: args.intent_snapshot_id,
-            optimization_target: args.optimization_target ?? "sharpe",
-            risk_mode: args.risk_mode ?? "balanced",
-            policy_mode: args.policy_mode ?? "agent_decides",
-            include_layers: args.include_layers,
-            freeze_params: freezeParams,
-            search_space_overrides: searchSpaceOverrides,
-            max_drawdown_limit: args.max_drawdown_limit,
-            turnover_cap: args.turnover_cap,
-            max_trials: args.max_trials ?? 20,
-            per_trial_estimated_seconds: args.per_trial_estimated_seconds ?? 0.5,
-          }))
-        },
-      }),
-      "analysis.deep-dive": tool({
-        description: "Generate deep analysis and suggestions from run artifacts",
-        args: {
-          run_id: tool.schema.string(),
-        },
-        async execute(args) {
-          return await trackedToolExecute("analysis.deep-dive", args as Record<string, unknown>, async () => postJson("/v1/analysis/deep-dive", args))
-        },
-      }),
-      "visualize.trade-blotter": tool({
+      "visualize_trade_blotter": tool({
         description: "Return trade blotter and signal context visualization payload",
         args: {
           run_id: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("visualize.trade-blotter", args as Record<string, unknown>, async () => postJson("/v1/visualize/trade-blotter", args))
+          return await trackedToolExecute("visualize_trade_blotter", args as Record<string, unknown>, async () => postJson("/v1/visualize/trade-blotter", args))
         },
       }),
-      "live.feed": tool({
+      "live_feed": tool({
         description: "Fetch live insights feed",
         args: {
           strategy_version_id: tool.schema.string().optional(),
           limit: tool.schema.number().int().positive().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("live.feed", args as Record<string, unknown>, async () => getJson(`/v1/live/feed${queryString({
+          return await trackedToolExecute("live_feed", args as Record<string, unknown>, async () => getJson(`/v1/live/feed${queryString({
             strategy_version_id: args.strategy_version_id,
             limit: args.limit ?? 100,
           })}`))
         },
       }),
-      "universe.resolve": tool({
+      "universe_resolve": tool({
         description: "Resolve and normalize universe symbols",
         args: {
           symbols: tool.schema.array(tool.schema.string()),
         },
         async execute(args) {
-          return await trackedToolExecute("universe.resolve", args as Record<string, unknown>, async () => postJson("/v1/universe/resolve", args.symbols))
+          return await trackedToolExecute("universe_resolve", args as Record<string, unknown>, async () => postJson("/v1/universe/resolve", args.symbols))
         },
       }),
-      "technicals.compute": tool({
+      "technicals_compute": tool({
         description: "Compute SMA technical features for selected universe and range",
         args: {
           universe: tool.schema.array(tool.schema.string()),
@@ -322,14 +309,14 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           long_window: tool.schema.number().int().positive().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("technicals.compute", args as Record<string, unknown>, async () => postJson("/v1/data/technicals/compute", {
+          return await trackedToolExecute("technicals_compute", args as Record<string, unknown>, async () => postJson("/v1/data/technicals/compute", {
             ...args,
             short_window: args.short_window ?? 5,
             long_window: args.long_window ?? 20,
           }))
         },
       }),
-      "backtest.tax.report": tool({
+      "backtest_tax_report": tool({
         description: "Compute optional tax-adjusted report for a completed backtest run",
         args: {
           run_id: tool.schema.string(),
@@ -342,7 +329,7 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           include_charges: tool.schema.boolean().optional(),
         },
         async execute(args) {
-          return await trackedToolExecute("backtest.tax.report", args as Record<string, unknown>, async () => postJson("/v1/backtests/tax/report", {
+          return await trackedToolExecute("backtest_tax_report", args as Record<string, unknown>, async () => postJson("/v1/backtests/tax/report", {
             run_id: args.run_id,
             enabled: args.enabled ?? true,
             stcg_rate: args.stcg_rate ?? 0.20,
@@ -354,30 +341,30 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           }))
         },
       }),
-      "diagnostics.readiness": tool({
+      "diagnostics_readiness": tool({
         description: "Read deployment readiness checks for publishable setup",
         args: {},
         async execute(args) {
-          return await trackedToolExecute("diagnostics.readiness", args as Record<string, unknown>, async () => getJson("/v1/diagnostics/readiness"))
+          return await trackedToolExecute("diagnostics_readiness", args as Record<string, unknown>, async () => getJson("/v1/diagnostics/readiness"))
         },
       }),
-      "providers.health": tool({
+      "providers_health": tool({
         description: "Read provider health/configuration summary",
         args: {},
         async execute(args) {
-          return await trackedToolExecute("providers.health", args as Record<string, unknown>, async () => getJson("/v1/providers/health"))
+          return await trackedToolExecute("providers_health", args as Record<string, unknown>, async () => getJson("/v1/providers/health"))
         },
       }),
-      "session.rehydrate": tool({
+      "session_rehydrate": tool({
         description: "Restore latest persisted session state and recent tool deltas",
         args: {
           session_id: tool.schema.string(),
         },
         async execute(args) {
-          return await trackedToolExecute("session.rehydrate", args as Record<string, unknown>, async () => postJson("/v1/session/rehydrate", args))
+          return await trackedToolExecute("session_rehydrate", args as Record<string, unknown>, async () => postJson("/v1/session/rehydrate", args))
         },
       }),
-      "auth.kite.status": tool({
+      "auth_kite_status": tool({
         description: "Read current Kite connector status",
         args: {},
         async execute() {
