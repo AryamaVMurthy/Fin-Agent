@@ -1,0 +1,42 @@
+{
+  "name": "fin-agent-wrapper",
+  "version": "0.1.0",
+  "description": "CLI wrapper for Fin-Agent local runtime and API proxy",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "main": "src/index.mjs",
+  "bin": {
+    "fin-agent": "src/cli.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "node src/cli.mjs wrapper",
+    "dev": "node src/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "fin-agent",
+    "trading",
+    "opencode",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AryamaVMurthy/Fin-Agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AryamaVMurthy/Fin-Agent/issues"
+  },
+  "homepage": "https://github.com/AryamaVMurthy/Fin-Agent#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "undici": "^7.16.0"
+  }
+}

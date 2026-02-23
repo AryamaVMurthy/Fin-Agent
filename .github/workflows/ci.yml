@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python runtime deps
+        run: |
+          python -m venv .venv312
+          .venv312/bin/pip install --upgrade pip
+          .venv312/bin/pip install duckdb fastapi pydantic uvicorn cryptography
+
+      - name: Install wrapper deps
+        run: |
+          cd apps/fin-agent
+          npm ci
+
+      - name: Publish readiness gate (CI mode)
+        run: |
+          bash scripts/publish-readiness.sh --skip-auth --allow-dirty
+
+      - name: Strict deterministic E2E
+        run: |
+          bash scripts/e2e-full.sh --skip-doctor
+
+      - name: Release packaging dry-run
+        run: |
+          bash scripts/release-tui.sh --dry-run --version ci

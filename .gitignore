@@ -1,0 +1,12 @@
+.finagent/
+.finagent-test/
+.finagent-cache/
+.venv312/
+.venv/
+dist/
+__pycache__/
+*.pyc
+apps/fin-agent/node_modules/
+apps/fin-agent/.env
+.env.local
+*.log
