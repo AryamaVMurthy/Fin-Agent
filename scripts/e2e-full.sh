@@ -6,9 +6,13 @@ cd "${ROOT_DIR}"
 
 API_PORT="${FIN_AGENT_E2E_API_PORT:-18080}"
 WRAPPER_PORT="${FIN_AGENT_E2E_WRAPPER_PORT:-18090}"
+OPENCODE_HOST="${OPENCODE_HOSTNAME:-127.0.0.1}"
+OPENCODE_PORT_VALUE="${OPENCODE_PORT:-4096}"
+OPENCODE_BASE="http://${OPENCODE_HOST}:${OPENCODE_PORT_VALUE}"
 WITH_PROVIDERS=0
 WITH_OPENCODE=0
 WITH_WEB_VISUAL=0
+WITH_WEB_PLAYWRIGHT=0
 REQUIRE_DOCTOR=1
 DRY_RUN=0
 OUTPUT_DIR=""
@@ -23,6 +27,7 @@ Options:
   --wrapper-port N       Wrapper port (default: 18090)
   --with-providers       Run strict live provider checks (Kite/NSE; TradingView if configured)
   --with-opencode        Run strict OpenCode auth checks
+  --with-web-playwright  Run full Playwright interaction web UI checks
   --with-web-visual      Run Playwright visual web UI checks
   --skip-doctor          Skip scripts/doctor.sh gate
   --output-dir DIR       Output directory for logs/artifacts
@@ -48,6 +53,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-opencode)
       WITH_OPENCODE=1
+      shift
+      ;;
+    --with-web-playwright)
+      WITH_WEB_PLAYWRIGHT=1
       shift
       ;;
     --with-web-visual)
@@ -87,8 +96,10 @@ if [[ ${DRY_RUN} -eq 1 ]]; then
 rigorous e2e dry-run
 api_port=${API_PORT}
 wrapper_port=${WRAPPER_PORT}
+opencode_base=${OPENCODE_BASE}
 with_providers=${WITH_PROVIDERS}
 with_opencode=${WITH_OPENCODE}
+with_web_playwright=${WITH_WEB_PLAYWRIGHT}
 with_web_visual=${WITH_WEB_VISUAL}
 require_doctor=${REQUIRE_DOCTOR}
 runtime_home=${RUNTIME_HOME:-"(output_dir/runtime)"}
@@ -101,6 +112,7 @@ gates:
   - wrapper parity checks
   - optional strict providers gate
   - optional strict opencode gate
+  - optional strict playwright interaction gate
   - optional playwright web visual gate
   - artifact summary and step logs
 EOF
@@ -176,6 +188,7 @@ CSV
 
 API_PID=""
 WRAPPER_PID=""
+OPENCODE_PID=""
 
 cleanup() {
   if [[ -n "${WRAPPER_PID}" ]]; then
@@ -186,8 +199,33 @@ cleanup() {
     kill "${API_PID}" >/dev/null 2>&1 || true
     wait "${API_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${OPENCODE_PID}" ]]; then
+    kill "${OPENCODE_PID}" >/dev/null 2>&1 || true
+    wait "${OPENCODE_PID}" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
+
+if [[ ${WITH_OPENCODE} -eq 1 || ${WITH_WEB_PLAYWRIGHT} -eq 1 ]]; then
+  if curl -fsS "${OPENCODE_BASE}/global/health" >/dev/null 2>&1; then
+    echo "reusing existing opencode server at ${OPENCODE_BASE}"
+  else
+    OPENCODE_HOSTNAME="${OPENCODE_HOST}" \
+      OPENCODE_PORT="${OPENCODE_PORT_VALUE}" \
+      bash scripts/opencode-serve.sh >"${OUTPUT_DIR}/logs/opencode.log" 2>&1 &
+    OPENCODE_PID=$!
+    for _ in $(seq 1 200); do
+      if curl -fsS "${OPENCODE_BASE}/global/health" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.1
+    done
+    if ! curl -fsS "${OPENCODE_BASE}/global/health" >/dev/null 2>&1; then
+      echo "opencode health check failed at ${OPENCODE_BASE}/global/health" >&2
+      exit 1
+    fi
+  fi
+fi
 
 env -u PYTHONHOME -u PYTHONPATH \
   PYTHONPATH="${ROOT_DIR}/py" \
@@ -198,6 +236,7 @@ env -u PYTHONHOME -u PYTHONPATH \
 API_PID=$!
 
 FIN_AGENT_API="http://127.0.0.1:${API_PORT}" \
+  OPENCODE_API="${OPENCODE_BASE}" \
   PORT="${WRAPPER_PORT}" \
   node apps/fin-agent/src/index.mjs >"${OUTPUT_DIR}/logs/wrapper.log" 2>&1 &
 WRAPPER_PID=$!
@@ -854,6 +893,22 @@ def opencode_flow() -> None:
     if not bool(status.get("connected")):
         raise RuntimeError(f"OpenCode OAuth not connected according to API status: {status}")
 
+    chat_health = call(
+        "wrapper-chat-health",
+        method="GET",
+        base_url=WRAPPER_BASE,
+        path="/v1/chat/health",
+    )
+    _assert(bool(chat_health.get("healthy")), f"wrapper chat health unexpected payload: {chat_health}")
+
+    sessions = call(
+        "wrapper-chat-sessions",
+        method="GET",
+        base_url=WRAPPER_BASE,
+        path="/v1/chat/sessions",
+    )
+    _assert("sessions" in sessions, f"wrapper chat sessions missing sessions key: {sessions}")
+
 
 try:
     run_step("core-deterministic-flow", core_flow)
@@ -910,7 +965,17 @@ PY
 echo "rigorous e2e output dir: ${OUTPUT_DIR}"
 echo "api log: ${OUTPUT_DIR}/logs/api.log"
 echo "wrapper log: ${OUTPUT_DIR}/logs/wrapper.log"
+if [[ -f "${OUTPUT_DIR}/logs/opencode.log" ]]; then
+  echo "opencode log: ${OUTPUT_DIR}/logs/opencode.log"
+fi
 echo "summary: ${OUTPUT_DIR}/artifacts/summary.json"
+
+if [[ ${WITH_WEB_PLAYWRIGHT} -eq 1 ]]; then
+  bash scripts/e2e-web-playwright.sh \
+    --api-base "http://127.0.0.1:${API_PORT}" \
+    --url "http://127.0.0.1:${WRAPPER_PORT}" \
+    --output-dir "${OUTPUT_DIR}/artifacts/web-playwright"
+fi
 
 if [[ ${WITH_WEB_VISUAL} -eq 1 ]]; then
   bash scripts/e2e-web-visual.sh \

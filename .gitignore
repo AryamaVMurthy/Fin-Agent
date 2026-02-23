@@ -9,6 +9,7 @@ dist/
 __pycache__/
 *.pyc
 apps/fin-agent/node_modules/
+apps/fin-agent-web/node_modules/
 apps/fin-agent/.env
 .env.local
 *.log

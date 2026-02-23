@@ -49,6 +49,16 @@ function showStatus(message, tone = "info") {
 }
 showStatus.timer = 0;
 
+function formatErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return "Unknown error";
+}
+
 function appendTimeline(text) {
   const list = byId("event-timeline");
   const li = document.createElement("li");
@@ -131,8 +141,7 @@ async function loadMessages(sessionId) {
 
 async function sendMessage(text, title = "") {
   if (!text.trim()) {
-    showStatus("Message cannot be empty.", "error");
-    return;
+    throw new Error("Message cannot be empty.");
   }
   const payload = {
     session_id: state.sessionId || undefined,
@@ -280,7 +289,7 @@ function bindUiEvents() {
     try {
       await loadMessages(next);
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -300,7 +309,7 @@ function bindUiEvents() {
       await sendMessage(message);
       showStatus("Message sent.", "ok");
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -311,7 +320,7 @@ function bindUiEvents() {
         await sendMessage(prompt);
         showStatus("Action sent to agent.", "ok");
       } catch (error) {
-        showStatus(String(error), "error");
+        showStatus(formatErrorMessage(error), "error");
       }
     });
   }
@@ -321,7 +330,7 @@ function bindUiEvents() {
       await refreshAll();
       showStatus("All workspaces refreshed.", "ok");
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -330,7 +339,7 @@ function bindUiEvents() {
       await refreshAuditTimeline();
       showStatus("Timeline refreshed.", "ok");
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -338,7 +347,7 @@ function bindUiEvents() {
     try {
       await loadBacktests();
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -346,7 +355,7 @@ function bindUiEvents() {
     try {
       await loadTuning();
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -354,7 +363,7 @@ function bindUiEvents() {
     try {
       await loadLiveStates();
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -362,7 +371,7 @@ function bindUiEvents() {
     try {
       await loadDiagnostics();
     } catch (error) {
-      showStatus(String(error), "error");
+      showStatus(formatErrorMessage(error), "error");
     }
   });
 
@@ -372,7 +381,7 @@ function bindUiEvents() {
       try {
         await loadBacktestRunDetail(viewBacktest.dataset.viewBacktest);
       } catch (error) {
-        showStatus(String(error), "error");
+        showStatus(formatErrorMessage(error), "error");
       }
       return;
     }
@@ -382,7 +391,7 @@ function bindUiEvents() {
       try {
         await loadTuningDetail(viewTuning.dataset.viewTuning);
       } catch (error) {
-        showStatus(String(error), "error");
+        showStatus(formatErrorMessage(error), "error");
       }
       return;
     }
@@ -415,8 +424,9 @@ async function init() {
     appendTimeline("UI initialized");
     showStatus("Connected.", "ok");
   } catch (error) {
-    showStatus(String(error), "error");
-    appendTimeline(`Initialization error: ${String(error)}`);
+    const message = formatErrorMessage(error);
+    showStatus(message, "error");
+    appendTimeline(`Initialization error: ${message}`);
   }
 
   window.setInterval(async () => {

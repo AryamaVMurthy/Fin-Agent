@@ -16,7 +16,9 @@ class RigorousE2EScriptTests(unittest.TestCase):
         self.assertIn("rigorous e2e dry-run", proc.stdout)
         self.assertIn("deterministic data imports", proc.stdout)
         self.assertIn("optional strict providers gate", proc.stdout)
+        self.assertIn("optional strict playwright interaction gate", proc.stdout)
         self.assertIn("optional playwright web visual gate", proc.stdout)
+        self.assertIn("with_web_playwright=0", proc.stdout)
 
 
 if __name__ == "__main__":

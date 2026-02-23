@@ -90,11 +90,24 @@ When `--with-providers` is enabled, missing config or auth is a hard failure.
 
 1. `opencode` binary availability.
 2. OpenAI auth presence (`oauth` or `api` credential).
-3. Optional server start and minimal reachability.
+3. Real server reachability via wrapper chat bridge:
+  - `/v1/chat/health`
+  - `/v1/chat/sessions`
 
 When `--with-opencode` is enabled, missing auth is a hard failure.
 
-### E. Publishability flow (mandatory)
+### E. Real web interaction flow (optional strict gate)
+
+1. Launch full Playwright interaction suite through wrapper:
+  - chat journey
+  - workspace journey
+  - robustness journey
+2. Uses deterministic seed via `scripts/seed-web-e2e.sh`.
+3. No stubs; requires real OpenCode server.
+
+When `--with-web-playwright` is enabled, any failing browser interaction gate is a hard failure.
+
+### F. Publishability flow (mandatory)
 
 1. `scripts/doctor.sh`
 2. Linux install script sanity
@@ -110,6 +123,8 @@ A run must generate:
 3. `artifacts/summary.json`
 4. `artifacts/steps.jsonl`
 5. `artifacts/http/*.json` request/response captures
+6. `artifacts/web-playwright/*` traces/screenshots/results (when enabled)
+7. `logs/opencode.log` when e2e-full launches OpenCode locally
 
 ## 5) Pass Criteria
 
@@ -123,6 +138,7 @@ Optional gates pass when explicitly enabled:
 
 1. Provider live flow (strict).
 2. OpenCode flow (strict).
+3. Real Playwright interaction flow (strict).
 
 ## 6) Failure Policy
 
@@ -142,3 +158,10 @@ On first failure:
   - e2e full deterministic run
   - optional live/provider run if configured.
 4. Publish result summary in Beads issue notes.
+
+## 8) Canonical Commands
+
+1. Full strict real-stack run (no stubs):
+  - `bash scripts/e2e-full.sh --with-opencode --with-web-playwright --with-web-visual --runtime-home .finagent`
+2. Full strict with provider live checks:
+  - `bash scripts/e2e-full.sh --with-opencode --with-providers --with-web-playwright --with-web-visual --runtime-home .finagent`
