@@ -8,6 +8,7 @@ API_PORT="${FIN_AGENT_E2E_API_PORT:-18080}"
 WRAPPER_PORT="${FIN_AGENT_E2E_WRAPPER_PORT:-18090}"
 WITH_PROVIDERS=0
 WITH_OPENCODE=0
+WITH_WEB_VISUAL=0
 REQUIRE_DOCTOR=1
 DRY_RUN=0
 OUTPUT_DIR=""
@@ -22,6 +23,7 @@ Options:
   --wrapper-port N       Wrapper port (default: 18090)
   --with-providers       Run strict live provider checks (Kite/NSE; TradingView if configured)
   --with-opencode        Run strict OpenCode auth checks
+  --with-web-visual      Run Playwright visual web UI checks
   --skip-doctor          Skip scripts/doctor.sh gate
   --output-dir DIR       Output directory for logs/artifacts
   --runtime-home DIR     FIN_AGENT_HOME to use for runtime state (default: OUTPUT_DIR/runtime)
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-opencode)
       WITH_OPENCODE=1
+      shift
+      ;;
+    --with-web-visual)
+      WITH_WEB_VISUAL=1
       shift
       ;;
     --skip-doctor)
@@ -83,6 +89,7 @@ api_port=${API_PORT}
 wrapper_port=${WRAPPER_PORT}
 with_providers=${WITH_PROVIDERS}
 with_opencode=${WITH_OPENCODE}
+with_web_visual=${WITH_WEB_VISUAL}
 require_doctor=${REQUIRE_DOCTOR}
 runtime_home=${RUNTIME_HOME:-"(output_dir/runtime)"}
 gates:
@@ -94,6 +101,7 @@ gates:
   - wrapper parity checks
   - optional strict providers gate
   - optional strict opencode gate
+  - optional playwright web visual gate
   - artifact summary and step logs
 EOF
   exit 0
@@ -903,3 +911,9 @@ echo "rigorous e2e output dir: ${OUTPUT_DIR}"
 echo "api log: ${OUTPUT_DIR}/logs/api.log"
 echo "wrapper log: ${OUTPUT_DIR}/logs/wrapper.log"
 echo "summary: ${OUTPUT_DIR}/artifacts/summary.json"
+
+if [[ ${WITH_WEB_VISUAL} -eq 1 ]]; then
+  bash scripts/e2e-web-visual.sh \
+    --url "http://127.0.0.1:${WRAPPER_PORT}/app" \
+    --output-dir "${OUTPUT_DIR}/artifacts/web-visual"
+fi

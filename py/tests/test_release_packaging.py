@@ -39,6 +39,8 @@ class ReleasePackagingTests(unittest.TestCase):
             names = set(tf.getnames())
         self.assertIn(f"fin-agent-tui-{version}/LICENSE", names)
         self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent/src/cli.mjs", names)
+        self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent-web/dist/index.html", names)
+        self.assertIn(f"fin-agent-tui-{version}/apps/fin-agent-web/dist/assets/app.js", names)
         self.assertIn(f"fin-agent-tui-{version}/docs/runbooks/publish-stage1.md", names)
 
 

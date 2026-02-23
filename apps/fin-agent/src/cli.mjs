@@ -11,6 +11,9 @@ Usage:
 
 Commands:
   wrapper                 Start HTTP wrapper server (proxy /health and /v1/*)
+  web-dev [args...]       Run web UI dev server (apps/fin-agent-web)
+  web-build [args...]     Build web UI bundle (apps/fin-agent-web)
+  web-preview [args...]   Preview built web UI bundle (apps/fin-agent-web)
   doctor [args...]        Run scripts/doctor.sh from a Fin-Agent repo checkout
   start [args...]         Run scripts/start-all.sh from a Fin-Agent repo checkout
   smoke [args...]         Run scripts/e2e-smoke.sh from a Fin-Agent repo checkout
@@ -50,18 +53,30 @@ function scriptPath(repoRoot, scriptName) {
 
 function runScript(repoRoot, scriptName, forwardedArgs) {
   const path = scriptPath(repoRoot, scriptName);
+  return runCommand("bash", [path, ...forwardedArgs], repoRoot);
+}
+
+function runCommand(command, commandArgs, cwd) {
   return new Promise((resolveCode) => {
-    const child = spawn("bash", [path, ...forwardedArgs], {
-      cwd: repoRoot,
+    const child = spawn(command, commandArgs, {
+      cwd,
       stdio: "inherit",
       env: process.env,
     });
     child.on("exit", (code) => resolveCode(code ?? 1));
     child.on("error", (error) => {
-      process.stderr.write(`error: failed to run ${scriptName}: ${error.message}\n`);
+      process.stderr.write(`error: failed to run ${command}: ${error.message}\n`);
       resolveCode(1);
     });
   });
+}
+
+function webAppRoot(repoRoot) {
+  const path = resolve(repoRoot, "apps", "fin-agent-web");
+  if (!existsSync(path)) {
+    throw new Error(`missing web app directory: ${path}`);
+  }
+  return path;
 }
 
 async function main() {
@@ -75,6 +90,18 @@ async function main() {
   if (command === "wrapper") {
     await import(new URL("./index.mjs", import.meta.url));
     return;
+  }
+  if (command === "web-dev") {
+    const cwd = webAppRoot(repoRoot);
+    process.exit(await runCommand("npm", ["run", "dev", "--", ...forwarded], cwd));
+  }
+  if (command === "web-build") {
+    const cwd = webAppRoot(repoRoot);
+    process.exit(await runCommand("npm", ["run", "build", "--", ...forwarded], cwd));
+  }
+  if (command === "web-preview") {
+    const cwd = webAppRoot(repoRoot);
+    process.exit(await runCommand("npm", ["run", "preview", "--", ...forwarded], cwd));
   }
   if (command === "doctor") {
     process.exit(await runScript(repoRoot, "doctor.sh", forwarded));

@@ -24,6 +24,12 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _require_positive_limit(limit: int) -> int:
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    return int(limit)
+
+
 @contextmanager
 def connect(paths: RuntimePaths) -> Generator[sqlite3.Connection, None, None]:
     paths.ensure()
@@ -304,6 +310,73 @@ def get_strategy_version(paths: RuntimePaths, strategy_version_id: str) -> dict[
     }
 
 
+def list_strategies(paths: RuntimePaths, limit: int = 100) -> list[dict[str, Any]]:
+    limit = _require_positive_limit(limit)
+    with connect(paths) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              s.id AS strategy_id,
+              s.name AS strategy_name,
+              s.created_at AS strategy_created_at,
+              sv.id AS latest_strategy_version_id,
+              sv.version_number AS latest_version_number,
+              sv.created_at AS latest_version_created_at
+            FROM strategies s
+            LEFT JOIN strategy_versions sv
+              ON sv.id = (
+                SELECT inner_sv.id
+                FROM strategy_versions inner_sv
+                WHERE inner_sv.strategy_id = s.id
+                ORDER BY inner_sv.version_number DESC
+                LIMIT 1
+              )
+            ORDER BY s.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            "strategy_id": row["strategy_id"],
+            "strategy_name": row["strategy_name"],
+            "created_at": row["strategy_created_at"],
+            "latest_strategy_version_id": row["latest_strategy_version_id"],
+            "latest_version_number": int(row["latest_version_number"]) if row["latest_version_number"] is not None else None,
+            "latest_created_at": row["latest_version_created_at"],
+        }
+        for row in rows
+    ]
+
+
+def list_strategy_versions(paths: RuntimePaths, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    if not strategy_id.strip():
+        raise ValueError("strategy_id is required")
+    limit = _require_positive_limit(limit)
+    with connect(paths) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, strategy_id, version_number, payload_json, created_at
+            FROM strategy_versions
+            WHERE strategy_id = ?
+            ORDER BY version_number DESC
+            LIMIT ?
+            """,
+            (strategy_id, limit),
+        ).fetchall()
+    return [
+        {
+            "strategy_version_id": row["id"],
+            "strategy_id": row["strategy_id"],
+            "version_number": int(row["version_number"]),
+            "spec": json.loads(row["payload_json"]),
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
 def save_world_manifest(paths: RuntimePaths, manifest: dict[str, Any]) -> str:
     manifest_id = manifest.get("manifest_id") or str(uuid.uuid4())
     with connect(paths) as conn:
@@ -368,6 +441,52 @@ def get_backtest_run(paths: RuntimePaths, run_id: str) -> dict[str, Any]:
     }
 
 
+def list_backtest_runs(
+    paths: RuntimePaths,
+    strategy_version_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    limit = _require_positive_limit(limit)
+    if strategy_version_id:
+        query = """
+            SELECT id, strategy_version_id, world_manifest_id, metrics_json, artifacts_json, payload_json, created_at
+            FROM backtest_runs
+            WHERE strategy_version_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params: tuple[Any, ...] = (strategy_version_id, limit)
+    else:
+        query = """
+            SELECT id, strategy_version_id, world_manifest_id, metrics_json, artifacts_json, payload_json, created_at
+            FROM backtest_runs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params = (limit,)
+
+    with connect(paths) as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        run_payload = json.loads(row["payload_json"])
+        strategy_payload = run_payload.get("strategy", {})
+        payload.append(
+            {
+                "run_id": row["id"],
+                "strategy_version_id": row["strategy_version_id"],
+                "world_manifest_id": row["world_manifest_id"],
+                "strategy_name": strategy_payload.get("strategy_name"),
+                "metrics": json.loads(row["metrics_json"]),
+                "artifacts": json.loads(row["artifacts_json"]),
+                "payload": run_payload,
+                "created_at": row["created_at"],
+            }
+        )
+    return payload
+
+
 def save_code_strategy_version(
     paths: RuntimePaths,
     strategy_name: str,
@@ -414,6 +533,74 @@ def save_code_strategy_version(
         "strategy_version_id": version_id,
         "version_number": version_number,
     }
+
+
+def list_code_strategies(paths: RuntimePaths, limit: int = 100) -> list[dict[str, Any]]:
+    limit = _require_positive_limit(limit)
+    with connect(paths) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              s.id AS strategy_id,
+              s.name AS strategy_name,
+              s.created_at AS strategy_created_at,
+              sv.id AS latest_strategy_version_id,
+              sv.version_number AS latest_version_number,
+              sv.created_at AS latest_version_created_at
+            FROM code_strategies s
+            LEFT JOIN code_strategy_versions sv
+              ON sv.id = (
+                SELECT inner_sv.id
+                FROM code_strategy_versions inner_sv
+                WHERE inner_sv.strategy_id = s.id
+                ORDER BY inner_sv.version_number DESC
+                LIMIT 1
+              )
+            ORDER BY s.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            "strategy_id": row["strategy_id"],
+            "strategy_name": row["strategy_name"],
+            "created_at": row["strategy_created_at"],
+            "latest_strategy_version_id": row["latest_strategy_version_id"],
+            "latest_version_number": int(row["latest_version_number"]) if row["latest_version_number"] is not None else None,
+            "latest_created_at": row["latest_version_created_at"],
+        }
+        for row in rows
+    ]
+
+
+def list_code_strategy_versions(paths: RuntimePaths, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    if not strategy_id.strip():
+        raise ValueError("strategy_id is required")
+    limit = _require_positive_limit(limit)
+    with connect(paths) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, strategy_id, version_number, source_code, validation_json, created_at
+            FROM code_strategy_versions
+            WHERE strategy_id = ?
+            ORDER BY version_number DESC
+            LIMIT ?
+            """,
+            (strategy_id, limit),
+        ).fetchall()
+    return [
+        {
+            "strategy_version_id": row["id"],
+            "strategy_id": row["strategy_id"],
+            "version_number": int(row["version_number"]),
+            "source_code": row["source_code"],
+            "validation": json.loads(row["validation_json"]),
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
 
 
 def save_tuning_run(paths: RuntimePaths, strategy_name: str, payload: dict[str, Any]) -> str:
@@ -560,6 +747,70 @@ def list_tuning_layer_decisions(paths: RuntimePaths, tuning_run_id: str) -> list
     return payload
 
 
+def list_tuning_runs(paths: RuntimePaths, strategy_name: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    limit = _require_positive_limit(limit)
+    if strategy_name:
+        query = """
+            SELECT id, strategy_name, payload_json, created_at
+            FROM tuning_runs
+            WHERE strategy_name = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params: tuple[Any, ...] = (strategy_name, limit)
+    else:
+        query = """
+            SELECT id, strategy_name, payload_json, created_at
+            FROM tuning_runs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params = (limit,)
+    with connect(paths) as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        raw_payload = json.loads(row["payload_json"])
+        best_candidate = raw_payload.get("best_candidate", {})
+        evaluated = raw_payload.get("evaluated_candidates", [])
+        payload.append(
+            {
+                "tuning_run_id": row["id"],
+                "strategy_name": row["strategy_name"],
+                "best_score": best_candidate.get("score"),
+                "best_backtest_run_id": best_candidate.get("run_id"),
+                "candidate_count": len(evaluated) if isinstance(evaluated, list) else 0,
+                "payload": raw_payload,
+                "created_at": row["created_at"],
+            }
+        )
+    return payload
+
+
+def get_tuning_run(paths: RuntimePaths, tuning_run_id: str) -> dict[str, Any]:
+    if not tuning_run_id.strip():
+        raise ValueError("tuning_run_id is required")
+    with connect(paths) as conn:
+        row = conn.execute(
+            """
+            SELECT id, strategy_name, payload_json, created_at
+            FROM tuning_runs
+            WHERE id = ?
+            """,
+            (tuning_run_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"tuning_run not found: {tuning_run_id}")
+    payload = json.loads(row["payload_json"])
+    return {
+        "tuning_run_id": row["id"],
+        "strategy_name": row["strategy_name"],
+        "payload": payload,
+        "created_at": row["created_at"],
+    }
+
+
 def upsert_live_state(
     paths: RuntimePaths,
     strategy_version_id: str,
@@ -607,6 +858,40 @@ def get_live_state(paths: RuntimePaths, strategy_version_id: str) -> dict[str, A
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def list_live_states(paths: RuntimePaths, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    limit = _require_positive_limit(limit)
+    if status:
+        query = """
+            SELECT strategy_version_id, strategy_name, status, payload_json, created_at, updated_at
+            FROM live_states
+            WHERE status = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+        """
+        params: tuple[Any, ...] = (status, limit)
+    else:
+        query = """
+            SELECT strategy_version_id, strategy_name, status, payload_json, created_at, updated_at
+            FROM live_states
+            ORDER BY updated_at DESC
+            LIMIT ?
+        """
+        params = (limit,)
+    with connect(paths) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [
+        {
+            "strategy_version_id": row["strategy_version_id"],
+            "strategy_name": row["strategy_name"],
+            "status": row["status"],
+            "payload": json.loads(row["payload_json"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
 
 
 def append_live_insight(

@@ -59,6 +59,12 @@ mkdir -p "${PKG_DIR}/apps/fin-agent/src"
 cp apps/fin-agent/package.json apps/fin-agent/package-lock.json "${PKG_DIR}/apps/fin-agent/"
 cp -r apps/fin-agent/src/. "${PKG_DIR}/apps/fin-agent/src/"
 
+mkdir -p "${PKG_DIR}/apps/fin-agent-web/src"
+mkdir -p "${PKG_DIR}/apps/fin-agent-web/dist"
+cp apps/fin-agent-web/package.json apps/fin-agent-web/index.html apps/fin-agent-web/vite.config.js "${PKG_DIR}/apps/fin-agent-web/"
+cp -r apps/fin-agent-web/src/. "${PKG_DIR}/apps/fin-agent-web/src/"
+cp -r apps/fin-agent-web/dist/. "${PKG_DIR}/apps/fin-agent-web/dist/"
+
 mkdir -p "${PKG_DIR}/.opencode"
 cp -r .opencode/commands .opencode/plugins .opencode/rules .opencode/skills .opencode/tools "${PKG_DIR}/.opencode/"
 cp .opencode/package.json "${PKG_DIR}/.opencode/package.json"

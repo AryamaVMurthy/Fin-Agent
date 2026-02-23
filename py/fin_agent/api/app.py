@@ -1182,6 +1182,26 @@ def code_strategy_save(request: CodeStrategySaveRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/v1/code-strategies")
+def code_strategies_list(limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        strategies = sqlite_store.list_code_strategies(paths, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"strategies": strategies, "count": len(strategies)}
+
+
+@app.get("/v1/code-strategies/{strategy_id}/versions")
+def code_strategy_versions_list(strategy_id: str, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        versions = sqlite_store.list_code_strategy_versions(paths, strategy_id=strategy_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"strategy_id": strategy_id, "versions": versions, "count": len(versions)}
+
+
 @app.post("/v1/code-strategy/run-sandbox")
 def code_strategy_run_sandbox(request: CodeStrategyRunRequest) -> dict[str, Any]:
     paths = _runtime_paths()
@@ -1333,6 +1353,26 @@ def strategy_from_intent(request: StrategyBuildRequest) -> dict[str, Any]:
         "strategy_version_id": version.version_id,
         "version_number": version.version_number,
     }
+
+
+@app.get("/v1/strategies")
+def strategies_list(limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        strategies = sqlite_store.list_strategies(paths, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"strategies": strategies, "count": len(strategies)}
+
+
+@app.get("/v1/strategies/{strategy_id}/versions")
+def strategy_versions_list(strategy_id: str, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        versions = sqlite_store.list_strategy_versions(paths, strategy_id=strategy_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"strategy_id": strategy_id, "versions": versions, "count": len(versions)}
 
 
 @app.post("/v1/world-state/build")
@@ -1616,6 +1656,35 @@ def tuning_run(request: TuningRunRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/v1/tuning/runs")
+def tuning_runs_list(
+    strategy_name: str | None = None,
+    limit: int = Query(default=100, gt=0),
+) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        runs = sqlite_store.list_tuning_runs(paths, strategy_name=strategy_name, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/v1/tuning/runs/{tuning_run_id}")
+def tuning_run_detail(tuning_run_id: str) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        tuning = sqlite_store.get_tuning_run(paths, tuning_run_id=tuning_run_id)
+        trials = sqlite_store.list_tuning_trials(paths, tuning_run_id=tuning_run_id)
+        layer_decisions = sqlite_store.list_tuning_layer_decisions(paths, tuning_run_id=tuning_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **tuning,
+        "trials": trials,
+        "layer_decisions": layer_decisions,
+    }
+
+
 @app.post("/v1/analysis/deep-dive")
 def analysis_deep_dive(request: AnalysisDeepDiveRequest) -> dict[str, Any]:
     paths = _runtime_paths()
@@ -1763,6 +1832,26 @@ def live_stop(request: LiveLifecycleRequest) -> dict[str, Any]:
     return {"strategy_version_id": request.strategy_version_id, "status": "stopped"}
 
 
+@app.get("/v1/live/states")
+def live_states_list(status: str | None = None, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        states = sqlite_store.list_live_states(paths, status=status, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"states": states, "count": len(states)}
+
+
+@app.get("/v1/live/states/{strategy_version_id}")
+def live_state_detail(strategy_version_id: str) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        state = sqlite_store.get_live_state(paths, strategy_version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return state
+
+
 @app.get("/v1/live/feed")
 def live_feed(strategy_version_id: str | None = None, limit: int = 100) -> dict[str, Any]:
     paths = _runtime_paths()
@@ -1788,6 +1877,30 @@ def live_boundary_candidates(strategy_version_id: str, top_k: int = 10) -> dict[
         "count": len(candidates),
         "similarity_method": "distance_to_sma_crossover_boundary",
     }
+
+
+@app.get("/v1/backtests/runs")
+def backtest_runs_list(strategy_version_id: str | None = None, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        runs = sqlite_store.list_backtest_runs(
+            paths,
+            strategy_version_id=strategy_version_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/v1/backtests/runs/{run_id}")
+def backtest_run_detail(run_id: str) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        run = sqlite_store.get_backtest_run(paths, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return run
 
 
 def _run_backtest_job(paths: RuntimePaths, job_id: str, trace_id: str) -> None:

@@ -34,6 +34,9 @@ class NpmPackageReadinessTests(unittest.TestCase):
         self.assertIn("wrapper", proc.stdout)
         self.assertIn("doctor", proc.stdout)
         self.assertIn("rigorous", proc.stdout)
+        self.assertIn("web-dev", proc.stdout)
+        self.assertIn("web-build", proc.stdout)
+        self.assertIn("web-preview", proc.stdout)
 
     def test_npm_pack_dry_run_contains_cli_and_wrapper_entry(self) -> None:
         root = Path(__file__).resolve().parents[2]
