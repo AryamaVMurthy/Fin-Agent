@@ -4,6 +4,8 @@
 .venv312/
 .venv/
 dist/
+!apps/fin-agent-web/dist/
+!apps/fin-agent-web/dist/**
 __pycache__/
 *.pyc
 apps/fin-agent/node_modules/
