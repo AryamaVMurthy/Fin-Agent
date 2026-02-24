@@ -33,6 +33,7 @@ def run_code_strategy_backtest(
     timeout_seconds: int = 5,
     memory_mb: int = 256,
     cpu_seconds: int = 2,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not universe:
         raise ValueError("universe must not be empty")
@@ -77,7 +78,12 @@ def run_code_strategy_backtest(
         cpu_seconds=cpu_seconds,
         data_bundle={"universe": universe},
         frame=frame,
-        context={"start_date": start_date, "end_date": end_date, "initial_capital": initial_capital},
+        context={
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            **(context or {}),
+        },
     )
 
     outputs = sandbox["outputs"]

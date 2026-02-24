@@ -76,7 +76,7 @@ Major endpoint groups:
 1. Auth/connectors.
 2. Provider data.
 3. Data ingestion/transforms.
-4. Brainstorm/intent/strategy.
+4. Strategy intake/spec and versioning.
 5. World state + preflight.
 6. Backtest/tuning/analysis.
 7. Visualization/live lifecycle.

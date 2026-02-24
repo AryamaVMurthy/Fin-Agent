@@ -726,6 +726,113 @@ def save_tuning_run(paths: RuntimePaths, strategy_name: str, payload: dict[str, 
     return run_id
 
 
+def _merge_payload(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_payload(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def update_tuning_run(paths: RuntimePaths, tuning_run_id: str, updates: dict[str, Any]) -> None:
+    if not tuning_run_id.strip():
+        raise ValueError("tuning_run_id is required")
+    if not isinstance(updates, dict):
+        raise ValueError("tuning run updates must be an object")
+    if not updates:
+        return
+
+    current = get_tuning_run(paths, tuning_run_id)["payload"]
+    updated_payload = _merge_payload(current, updates)
+
+    with connect(paths) as conn:
+        conn.execute(
+            "UPDATE tuning_runs SET payload_json = ? WHERE id = ?",
+            (json.dumps(updated_payload), tuning_run_id),
+        )
+        conn.commit()
+
+
+def append_tuning_trial(
+    paths: RuntimePaths,
+    tuning_run_id: str,
+    backtest_run_id: str,
+    params: dict[str, Any],
+    metrics: dict[str, Any],
+    score: float,
+) -> None:
+    if not tuning_run_id.strip():
+        raise ValueError("tuning_run_id is required")
+    if not backtest_run_id.strip():
+        raise ValueError("backtest_run_id is required")
+    if not isinstance(params, dict):
+        raise ValueError("tuning trial params must be an object")
+    if not isinstance(metrics, dict):
+        raise ValueError("tuning trial metrics must be an object")
+    try:
+        score_value = float(score)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("tuning trial score must be numeric") from exc
+    _ = get_tuning_run(paths, tuning_run_id)
+    with connect(paths) as conn:
+        conn.execute(
+            """
+            INSERT INTO tuning_trials
+              (tuning_run_id, backtest_run_id, params_json, metrics_json, score, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tuning_run_id,
+                backtest_run_id,
+                json.dumps(params),
+                json.dumps(metrics),
+                score_value,
+                _utc_now(),
+            ),
+        )
+        conn.commit()
+
+
+def append_tuning_layer_decision(
+    paths: RuntimePaths,
+    tuning_run_id: str,
+    layer_name: str,
+    enabled: bool,
+    reason: str,
+    payload: dict[str, Any],
+) -> None:
+    if not tuning_run_id.strip():
+        raise ValueError("tuning_run_id is required")
+    if not layer_name.strip():
+        raise ValueError("layer_name is required")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be boolean")
+    if not reason.strip():
+        raise ValueError("reason is required")
+    if not isinstance(payload, dict):
+        raise ValueError("tuning layer payload must be an object")
+    _ = get_tuning_run(paths, tuning_run_id)
+    with connect(paths) as conn:
+        conn.execute(
+            """
+            INSERT INTO tuning_layer_decisions
+              (tuning_run_id, layer_name, enabled, reason, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tuning_run_id,
+                layer_name,
+                1 if enabled else 0,
+                reason,
+                json.dumps(payload),
+                _utc_now(),
+            ),
+        )
+        conn.commit()
+
+
 def list_tuning_trials(paths: RuntimePaths, tuning_run_id: str) -> list[dict[str, Any]]:
     if not tuning_run_id.strip():
         raise ValueError("tuning_run_id is required")

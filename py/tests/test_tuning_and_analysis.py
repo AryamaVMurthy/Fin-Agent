@@ -63,41 +63,6 @@ class TuningAndAnalysisTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_tuning_search_space_endpoint_is_disabled(self) -> None:
-        request = app_module.TuningSearchSpaceRequest(
-            strategy_name="TuneMe",
-            optimization_target="sharpe",
-            risk_mode="balanced",
-            policy_mode="agent_decides",
-        )
-        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            with self.assertRaises(app_module.HTTPException) as ctx:
-                app_module.tuning_search_space_derive(request)
-        self.assertEqual(ctx.exception.status_code, 410)
-        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
-
-    def test_tuning_run_endpoint_is_disabled(self) -> None:
-        request = app_module.TuningRunRequest(
-            strategy_name="TuneRun",
-            optimization_target="sharpe",
-            risk_mode="balanced",
-            policy_mode="agent_decides",
-            max_trials=5,
-        )
-        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            with self.assertRaises(app_module.HTTPException) as ctx:
-                app_module.tuning_run(request)
-        self.assertEqual(ctx.exception.status_code, 410)
-        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
-
-    def test_analysis_deep_dive_endpoint_is_disabled(self) -> None:
-        request = app_module.AnalysisDeepDiveRequest(run_id=self.run_id)
-        with patch.object(app_module, "_runtime_paths", return_value=self.paths):
-            with self.assertRaises(app_module.HTTPException) as ctx:
-                app_module.analysis_deep_dive(request)
-        self.assertEqual(ctx.exception.status_code, 410)
-        self.assertIn("legacy_endpoint_disabled", str(ctx.exception.detail))
-
     def test_code_analysis_suggestions_have_evidence(self) -> None:
         with patch.object(app_module, "_runtime_paths", return_value=self.paths):
             with patch(

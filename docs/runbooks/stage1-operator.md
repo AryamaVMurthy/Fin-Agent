@@ -7,8 +7,8 @@ This runbook covers Stage 1 operations for:
 - OpenCode OAuth checks
 - Kite auth and account checks
 - Data import, PIT validation, and preflight gates
-- Backtest execution, async jobs, compare flows
-- Tuning/deep analysis, visualization, live lifecycle
+- Code strategy validation/backtest, compare flows
+- Tuning ledger review, visualization, live lifecycle
 - Custom code backtest + patch suggestions
 - Audit and structured log troubleshooting
 
@@ -121,7 +121,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/world-state/validate-pit \
   -d '{"universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","strict_mode":true}'
 ```
 
-## 5) Preflight Budgets
+## 5) Agentic Guardrails
 
 World-state:
 
@@ -129,22 +129,6 @@ World-state:
 curl -sS -X POST http://127.0.0.1:8080/v1/preflight/world-state \
   -H 'content-type: application/json' \
   -d '{"universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","max_allowed_seconds":20}'
-```
-
-Backtest:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/preflight/backtest \
-  -H 'content-type: application/json' \
-  -d '{"strategy_name":"SMA","intent_snapshot_id":"<id>","max_allowed_seconds":30}'
-```
-
-Tuning:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/preflight/tuning \
-  -H 'content-type: application/json' \
-  -d '{"num_trials":50,"per_trial_estimated_seconds":1.2,"max_allowed_seconds":60}'
 ```
 
 Custom code:
@@ -157,31 +141,23 @@ curl -sS -X POST http://127.0.0.1:8080/v1/preflight/custom-code \
 
 If preflight fails, API returns `400` with remediation text.
 
-## 6) Backtests and Compare
-
 Run:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/backtests/run \
+curl -sS -X POST http://127.0.0.1:8080/v1/code-strategy/backtest \
   -H 'content-type: application/json' \
-  -d '{"strategy_name":"SMA","intent":{"universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","initial_capital":100000,"short_window":2,"long_window":4,"max_positions":1}}'
+  -d '{"strategy_name":"CodeStrat","source_code":"<python code>","universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","initial_capital":100000}'
 ```
 
-Async run:
+Validate first if needed:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/backtests/run-async \
+curl -sS -X POST http://127.0.0.1:8080/v1/code-strategy/validate \
   -H 'content-type: application/json' \
-  -d '{"strategy_name":"SMA","intent_snapshot_id":"<id>"}'
+  -d '{"strategy_name":"CodeStrat","source_code":"<python code>"}'
 ```
 
-Job status:
-
-```bash
-curl -sS http://127.0.0.1:8080/v1/jobs/<job_id>
-```
-
-Compare:
+Compare historical runs (if needed):
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/backtests/compare \
@@ -189,42 +165,28 @@ curl -sS -X POST http://127.0.0.1:8080/v1/backtests/compare \
   -d '{"baseline_run_id":"<run1>","candidate_run_id":"<run2>"}'
 ```
 
-## 7) Tuning + Analysis + Visualization + Live
+## 6) Analysis + Visualization + Live
 
-Derive tuning search space:
+Analyze:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/tuning/search-space/derive \
+curl -sS -X POST http://127.0.0.1:8080/v1/code-strategy/analyze \
   -H 'content-type: application/json' \
-  -d '{"strategy_name":"Tune","intent":{"universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","initial_capital":100000,"short_window":2,"long_window":4,"max_positions":1},"optimization_target":"sharpe","risk_mode":"balanced","policy_mode":"user_selected","include_layers":["signal","execution"]}'
+  -d '{"run_id":"<run_id>","source_code":"<python code>"}'
 ```
 
 Key response fields:
-- `search_space` (effective parameter grid)
-- `tuning_plan.layers` (enabled/disabled layer decisions)
-- `tuning_plan.graph` (objective->layer->parameter graph)
-- `estimated_trials`
+- `report.markdown`
+- `diagnostics`
+- `improvement_suggestions`
+- `run_id`
+- `artifacts`
 
-Run tuning:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/tuning/run \
-  -H 'content-type: application/json' \
-  -d '{"strategy_name":"Tune","intent":{"universe":["ABC"],"start_date":"2025-01-01","end_date":"2025-01-10","initial_capital":100000,"short_window":2,"long_window":4,"max_positions":1},"optimization_target":"sharpe","risk_mode":"balanced","policy_mode":"user_selected","include_layers":["signal","execution"],"max_trials":5}'
-```
-
-Key response fields:
-- `best_candidate`
-- `top_candidates`
-- `sensitivity_analysis`
-- `tuning_plan`
-
-Deep dive:
+Tuning ledger:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/analysis/deep-dive \
-  -H 'content-type: application/json' \
-  -d '{"run_id":"<run_id>"}'
+curl -sS "http://127.0.0.1:8080/v1/tuning/runs?strategy_name=<strategy_name>&limit=20"
+curl -sS "http://127.0.0.1:8080/v1/tuning/runs/<tuning_run_id>"
 ```
 
 Trade blotter and boundary visualization:
@@ -233,7 +195,9 @@ Trade blotter and boundary visualization:
 curl -sS -X POST http://127.0.0.1:8080/v1/visualize/trade-blotter \
   -H 'content-type: application/json' \
   -d '{"run_id":"<run_id>"}'
+```
 
+```bash
 curl -sS -X POST http://127.0.0.1:8080/v1/visualize/boundary \
   -H 'content-type: application/json' \
   -d '{"strategy_version_id":"<strategy_version_id>","top_k":10}'
@@ -270,7 +234,7 @@ curl -sS -X POST http://127.0.0.1:8080/v1/code-strategy/analyze \
   -d '{"run_id":"<code_run_id>","source_code":"<python code>"}'
 ```
 
-## 8) Audit and Logs
+## 7) Audit and Logs
 
 Audit events:
 
@@ -289,7 +253,7 @@ Use `trace_id` to correlate:
 - job events
 - audit events
 
-## 9) Standard Failure Handling
+## 8) Standard Failure Handling
 
 1. Stop unsafe progression.
 2. Capture exact API error payload.

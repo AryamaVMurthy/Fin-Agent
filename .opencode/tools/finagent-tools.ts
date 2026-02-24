@@ -239,6 +239,88 @@ export const FinAgentToolsPlugin: Plugin = async () => {
           }))
         },
       }),
+      "tuning_run_start": tool({
+        description: "Start a hyperparameter search over a code strategy using a searchable parameter space",
+        args: {
+          strategy_name: tool.schema.string(),
+          source_code: tool.schema.string(),
+          universe: tool.schema.array(tool.schema.string()),
+          start_date: tool.schema.string(),
+          end_date: tool.schema.string(),
+          initial_capital: tool.schema.number().positive(),
+          search_space: tool.schema.record(tool.schema.any()),
+          objective: tool.schema.record(tool.schema.any()).optional(),
+          max_trials: tool.schema.number().int().positive().optional(),
+          max_layers: tool.schema.number().int().positive().optional(),
+          keep_top: tool.schema.number().int().positive().optional(),
+          max_trials_per_layer: tool.schema.number().int().positive().optional(),
+          timeout_seconds: tool.schema.number().int().positive().optional(),
+          memory_mb: tool.schema.number().int().positive().optional(),
+          cpu_seconds: tool.schema.number().int().positive().optional(),
+          max_estimated_seconds: tool.schema.number().positive().optional(),
+          random_seed: tool.schema.number().int().optional(),
+          use_optuna: tool.schema.boolean().optional(),
+          only_plan: tool.schema.boolean().optional(),
+          context: tool.schema.record(tool.schema.any()).optional(),
+          run_async: tool.schema.boolean().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("tuning_run_start", args as Record<string, unknown>, async () => postJson("/v1/tuning/runs", {
+            strategy_name: args.strategy_name,
+            source_code: args.source_code,
+            universe: args.universe,
+            start_date: args.start_date,
+            end_date: args.end_date,
+            initial_capital: args.initial_capital,
+            search_space: args.search_space,
+            objective: args.objective ?? {},
+            max_trials: args.max_trials ?? 12,
+            max_layers: args.max_layers ?? 2,
+            keep_top: args.keep_top ?? 1,
+            max_trials_per_layer: args.max_trials_per_layer ?? undefined,
+            timeout_seconds: args.timeout_seconds ?? 5,
+            memory_mb: args.memory_mb ?? 256,
+            cpu_seconds: args.cpu_seconds ?? 2,
+            max_estimated_seconds: args.max_estimated_seconds ?? undefined,
+            random_seed: args.random_seed ?? undefined,
+            use_optuna: args.use_optuna ?? false,
+            only_plan: args.only_plan ?? false,
+            context: args.context ?? {},
+            run_async: args.run_async ?? false,
+          }))
+        },
+      }),
+      "tuning_runs_list": tool({
+        description: "List tuning runs with latest results and statuses",
+        args: {
+          strategy_name: tool.schema.string().optional(),
+          limit: tool.schema.number().int().positive().optional(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("tuning_runs_list", args as Record<string, unknown>, async () => getJson(`/v1/tuning/runs${queryString({
+            strategy_name: args.strategy_name,
+            limit: args.limit ?? 50,
+          })}`))
+        },
+      }),
+      "tuning_run_detail": tool({
+        description: "Get tuning run detail including evaluated candidates and layer decisions",
+        args: {
+          tuning_run_id: tool.schema.string(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("tuning_run_detail", args as Record<string, unknown>, async () => getJson(`/v1/tuning/runs/${args.tuning_run_id}`))
+        },
+      }),
+      "job_status": tool({
+        description: "Fetch status of a background tuning job",
+        args: {
+          job_id: tool.schema.string(),
+        },
+        async execute(args) {
+          return await trackedToolExecute("job_status", args as Record<string, unknown>, async () => getJson(`/v1/jobs/${args.job_id}`))
+        },
+      }),
       "preflight_custom_code": tool({
         description: "Estimate and enforce runtime budget for code-strategy backtests",
         args: {

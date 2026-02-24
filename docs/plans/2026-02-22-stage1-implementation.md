@@ -18,7 +18,7 @@ Top-level Stage-1 epic:
 Main epics:
 - `Fin-Agent-ysh.1` OpenCode Wrapper + Tooling Kernel
 - `Fin-Agent-ysh.3` Data + PIT World-State (Stage 1)
-- `Fin-Agent-ysh.4` Strategy Lifecycle (Brainstorm->Spec->Versioning)
+- `Fin-Agent-ysh.4` Strategy Lifecycle (Intake->Spec->Versioning)
 - `Fin-Agent-ysh.7` Backtesting + Metrics + Compare
 - `Fin-Agent-ysh.5` Tuning + Deep Analysis + Suggestions
 - `Fin-Agent-ysh.8` Visualization + Artifacts
@@ -68,15 +68,15 @@ Optional expansion (still Stage 1):
 Deliverable: deterministic as-of world simulation with strict PIT validation by default.
 
 ### Phase 3: Strategy Lifecycle and Versioning
-19. `Fin-Agent-ysh.4.1` Interactive brainstorm session + IntentSnapshot lock
+19. `Fin-Agent-ysh.4.1` Interactive strategy-intake session + immutable intake snapshot
 20. `Fin-Agent-ysh.4.3` StrategySpec schema + validation + explainability contract
 21. `Fin-Agent-ysh.4.4` Strategy library (save/version/diff/list + rerun)
-22. `Fin-Agent-ysh.4.2` agent_decides mode + DecisionCard confirm/edit
+22. `Fin-Agent-ysh.4.2` Assisted-default mode + confirmation/edit loop
 
 Deliverable: user can chat, lock intent, produce StrategySpec, save versions, and rerun a chosen version.
 
 ### Phase 4: Backtesting + Metrics + Core Visualization
-23. `Fin-Agent-ysh.7.2` backtest.run integrated with PIT world state (deterministic manifests)
+23. `Fin-Agent-ysh.7.2` code-strategy backtest integrated with PIT world state (deterministic manifests)
 24. `Fin-Agent-ysh.7.3` Metrics + benchmark compare
 25. `Fin-Agent-ysh.8.1` Artifact store + indexing
 26. `Fin-Agent-ysh.8.2` Equity + drawdown charts

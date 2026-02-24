@@ -27,25 +27,24 @@ Prove the system is publish-ready from a real user perspective with:
   - API boot + `/health`
   - Wrapper boot + `/health`
 2. Data ingestion:
-  - OHLCV import
-  - Fundamentals/corporate-actions/ratings import
-3. Intent + strategy:
-  - `agent-decides/propose`
-  - `agent-decides/confirm`
-  - `strategy/from-intent`
+   - OHLCV import
+   - Fundamentals/corporate-actions/ratings import
+3. Strategy/code path:
+  - `code-strategy/validate`
+  - `code-strategy/save`
+  - `code-strategy/run-sandbox` (agentic quick dry-run)
+  - `code-strategy/backtest`
 4. World-state quality:
-  - `completeness`
-  - `validate-pit`
+   - `completeness`
+   - `validate-pit`
 5. Backtest lifecycle:
-  - `preflight/backtest`
-  - `backtests/run` (two variants)
+  - `preflight/world-state`
+  - `code-strategy/backtest`
   - `backtests/compare`
 6. Tuning lifecycle:
-  - `preflight/tuning`
-  - `tuning/search-space/derive` (policy-driven)
-  - `tuning/run` (sensitivity + plan output)
+  - `tuning/runs` ledger read
+  - `tuning/runs/{id}` details
 7. Analysis + visualization:
-  - `analysis/deep-dive`
   - `visualize/trade-blotter`
   - `visualize/boundary`
 8. Live lifecycle:

@@ -67,6 +67,78 @@ class TuningStorageTests(unittest.TestCase):
             sqlite_store.save_tuning_run(self.paths, strategy_name="Invalid", payload=payload)
         self.assertIn("missing run_id", str(ctx.exception))
 
+    def test_update_tuning_run_merges_payload(self) -> None:
+        run_id = sqlite_store.save_tuning_run(
+            self.paths,
+            strategy_name="Update Test",
+            payload={
+                "tuning_run_id": "run-3",
+                "status": "queued",
+                "request": {"max_trials": 4},
+                "result": {"status": "queued"},
+            },
+        )
+        sqlite_store.update_tuning_run(
+            self.paths,
+            tuning_run_id=run_id,
+            updates={"status": "running", "result": {"status": "running", "stage": "executing"}},
+        )
+        tuning = sqlite_store.get_tuning_run(self.paths, tuning_run_id=run_id)
+        self.assertEqual(tuning["payload"]["status"], "running")
+        self.assertEqual(tuning["payload"]["result"]["status"], "running")
+        self.assertEqual(tuning["payload"]["result"]["stage"], "executing")
+
+    def test_append_tuning_trial_and_layer_persistence(self) -> None:
+        base_run_id = sqlite_store.save_tuning_run(
+            self.paths,
+            strategy_name="Append Test",
+            payload={
+                "tuning_run_id": "run-4",
+                "status": "running",
+                "result": {"status": "running"},
+            },
+        )
+        sqlite_store.append_tuning_trial(
+            self.paths,
+            tuning_run_id=base_run_id,
+            backtest_run_id="bt-1",
+            params={"short_window": 5},
+            metrics={"sharpe": 1.2},
+            score=1.2,
+        )
+        sqlite_store.append_tuning_layer_decision(
+            self.paths,
+            tuning_run_id=base_run_id,
+            layer_name="layer_0",
+            enabled=True,
+            reason="initial sweep",
+            payload={"attempted": 1},
+        )
+
+        trials = sqlite_store.list_tuning_trials(self.paths, base_run_id)
+        layers = sqlite_store.list_tuning_layer_decisions(self.paths, base_run_id)
+        self.assertEqual(len(trials), 1)
+        self.assertEqual(trials[0]["backtest_run_id"], "bt-1")
+        self.assertEqual(len(layers), 1)
+        self.assertEqual(layers[0]["layer_name"], "layer_0")
+
+    def test_append_tuning_trial_rejects_invalid_inputs(self) -> None:
+        base_run_id = sqlite_store.save_tuning_run(
+            self.paths,
+            strategy_name="Invalid Append",
+            payload={"tuning_run_id": "run-5", "status": "running", "result": {"status": "running"}},
+        )
+        with self.assertRaises(ValueError) as ctx:
+            sqlite_store.append_tuning_trial(
+                self.paths,
+                tuning_run_id=base_run_id,
+                backtest_run_id="",
+                params={"short_window": 5},
+                metrics={"sharpe": 1.2},
+                score=1.2,
+            )
+        self.assertIn("backtest_run_id is required", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

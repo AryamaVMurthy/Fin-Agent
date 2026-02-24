@@ -62,7 +62,7 @@ This repo is intended to be a GitHub-maintained monorepo that wraps OpenCode ser
 
 - `.opencode/`: the “agent-first” layer.
   - Tools are small TS shims that schedule jobs and call Python CLIs.
-  - Skills/commands codify the allowed workflows: brainstorm, build strategy, backtest, tune, analyze, visualize, save, activate.
+  - Skills/commands codify the allowed workflows: strategy intake, build strategy, backtest, tune, analyze, visualize, save, activate.
 
 - `apps/fin-agent/`: the wrapper service.
   - Responsible for: auth wiring, tool routing, job queue/worker coordination, SSE event bridging.
@@ -87,4 +87,3 @@ This repo is intended to be a GitHub-maintained monorepo that wraps OpenCode ser
 - Decide whether `.beads/` is committed:
   - Personal-only planning: keep it local and exclude via gitignore.
   - Team-shared planning: commit `.beads/` so backlog is shared.
-

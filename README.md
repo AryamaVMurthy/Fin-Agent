@@ -2,7 +2,7 @@
 
 Stage-1 implementation (agent-first trading copilot) is now end-to-end complete for Stage-1 scope:
 
-1. Chat-first intent capture (`interactive` + `agent_decides` modes).
+1. Chat-first intent capture (`interactive` + `assistant-default` modes).
 2. Data import pipelines:
    - OHLCV (`.csv`/`.parquet`)
    - fundamentals (strict `published_at`)
@@ -14,7 +14,7 @@ Stage-1 implementation (agent-first trading copilot) is now end-to-end complete 
    - drawdown
    - trade blotter (entry/exit/pnl/reason codes)
    - signal context map
-5. Compare runs, tuning search-space derivation, budgeted tuning, and deep-dive analysis suggestions.
+5. Compare runs, tuning ledger review, and analysis diagnostics.
 6. Custom Python strategy lane:
    - contract validation
    - sandbox execution (CPU/memory/time limits)
@@ -34,7 +34,7 @@ Stage-1 implementation (agent-first trading copilot) is now end-to-end complete 
    - optional India STCG/LTCG + charges tax report endpoint
    - session snapshot/rehydrate + context delta persistence
    - provider health, observability metrics, readiness diagnostics endpoints
-9. Observability:
+10. Observability:
    - structured logs with trace IDs
    - audit event ledger
    - runbook in `docs/runbooks/stage1-operator.md`

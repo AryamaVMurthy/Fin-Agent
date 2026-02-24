@@ -5,20 +5,22 @@ import csv
 import hashlib
 import json
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import duckdb
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from fin_agent.backtest.compare import compare_backtest_runs
 from fin_agent.analysis.preflight import (
     enforce_custom_code_budget,
+    enforce_tuning_budget,
     enforce_world_state_budget,
 )
 from fin_agent.code_strategy.analysis import analyze_code_strategy_run
@@ -46,6 +48,7 @@ from fin_agent.security import encryption_enabled, redact_payload
 from fin_agent.screener.service import run_formula_screen, validate_formula
 from fin_agent.storage import duckdb_store, sqlite_store
 from fin_agent.storage.paths import RuntimePaths
+from fin_agent.tuning.engine import tune_strategy
 from fin_agent.tax import IndiaTaxAssumptions, compute_tax_report
 from fin_agent.world_state.service import (
     build_data_completeness_report,
@@ -152,33 +155,6 @@ class FundamentalsAsOfRequest(BaseModel):
     as_of: str
 
 
-class StrategyBuildRequest(BaseModel):
-    strategy_name: str = Field(min_length=3)
-
-
-class AgentDecidesProposeRequest(BaseModel):
-    universe: list[str] | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    initial_capital: float | None = Field(default=None, gt=0)
-    short_window: int | None = Field(default=None, ge=1)
-    long_window: int | None = Field(default=None, ge=2)
-    max_positions: int | None = Field(default=None, ge=1)
-
-
-class DecisionCardItem(BaseModel):
-    field: str
-    value: Any
-    source: str
-    rationale: str
-    confidence: float = Field(ge=0, le=1)
-
-
-class AgentDecidesConfirmRequest(BaseModel):
-    intent: dict[str, Any]
-    decision_card: list[DecisionCardItem]
-
-
 class WorldBuildRequest(BaseModel):
     universe: list[str]
     start_date: str
@@ -209,16 +185,6 @@ class BacktestRequest(BaseModel):
 class BacktestCompareRequest(BaseModel):
     baseline_run_id: str
     candidate_run_id: str
-
-
-class PreflightBacktestRequest(BacktestRequest):
-    max_allowed_seconds: float = Field(gt=0)
-
-
-class PreflightTuningRequest(BaseModel):
-    num_trials: int = Field(gt=0)
-    per_trial_estimated_seconds: float = Field(gt=0)
-    max_allowed_seconds: float = Field(gt=0)
 
 
 class PreflightCustomCodeRequest(WorldBuildRequest):
@@ -255,32 +221,34 @@ class CodeStrategyBacktestRequest(BaseModel):
     cpu_seconds: int = Field(gt=0, default=2)
 
 
+class TuningRunRequest(BaseModel):
+    strategy_name: str = Field(min_length=1)
+    source_code: str
+    universe: list[str] = Field(min_length=1)
+    start_date: str
+    end_date: str
+    initial_capital: float = Field(gt=0)
+    search_space: dict[str, Any]
+    objective: dict[str, Any] | None = None
+    max_trials: int = Field(gt=0, default=12)
+    max_layers: int = Field(gt=0, default=2)
+    keep_top: int = Field(gt=0, default=1)
+    max_trials_per_layer: int | None = Field(default=None, gt=0)
+    timeout_seconds: int = Field(gt=0, default=5)
+    memory_mb: int = Field(gt=0, default=256)
+    cpu_seconds: int = Field(gt=0, default=2)
+    max_estimated_seconds: float | None = Field(default=None, gt=0)
+    random_seed: int | None = None
+    use_optuna: bool = False
+    only_plan: bool = False
+    context: dict[str, Any] | None = None
+    run_async: bool = False
+
+
 class CodeStrategyAnalyzeRequest(BaseModel):
     run_id: str
     source_code: str
     max_suggestions: int = Field(gt=0, le=20, default=5)
-
-
-class TuningSearchSpaceRequest(BaseModel):
-    strategy_name: str = Field(min_length=1)
-    optimization_target: str = "sharpe"
-    risk_mode: str = "balanced"
-    policy_mode: str = "agent_decides"
-    include_layers: list[str] | None = None
-    freeze_params: dict[str, float] | None = None
-    search_space_overrides: dict[str, list[float]] | None = None
-    max_drawdown_limit: float | None = Field(default=None, gt=0)
-    turnover_cap: int | None = Field(default=None, gt=0)
-
-
-class TuningRunRequest(TuningSearchSpaceRequest):
-    search_space: dict[str, list[float]] | None = None
-    max_trials: int = Field(gt=0, default=20)
-    per_trial_estimated_seconds: float = Field(gt=0, default=0.5)
-
-
-class AnalysisDeepDiveRequest(BaseModel):
-    run_id: str
 
 
 class TradeBlotterRequest(BaseModel):
@@ -369,6 +337,237 @@ class ContextDeltaRequest(BaseModel):
     tool_name: str = Field(min_length=1)
     tool_input: dict[str, Any]
     tool_output: dict[str, Any]
+
+
+def _build_tuning_request_payload(request: TuningRunRequest) -> dict[str, Any]:
+    return {
+        "strategy_name": request.strategy_name,
+        "universe": request.universe,
+        "search_space": request.search_space,
+        "objective": request.objective,
+        "start_date": request.start_date,
+        "end_date": request.end_date,
+        "initial_capital": request.initial_capital,
+        "max_trials": request.max_trials,
+        "max_layers": request.max_layers,
+        "keep_top": request.keep_top,
+        "max_trials_per_layer": request.max_trials_per_layer,
+        "timeout_seconds": request.timeout_seconds,
+        "memory_mb": request.memory_mb,
+        "cpu_seconds": request.cpu_seconds,
+        "max_estimated_seconds": request.max_estimated_seconds,
+        "random_seed": request.random_seed,
+        "use_optuna": request.use_optuna,
+        "only_plan": request.only_plan,
+        "context": request.context or {},
+    }
+
+
+def _normalize_tuning_run_payload(
+    request: TuningRunRequest,
+    tuning_result: dict[str, Any],
+    run_id: str,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "tuning_run_id": run_id,
+        "status": status,
+        "request": _build_tuning_request_payload(request),
+        "result": tuning_result,
+    }
+
+
+def _tuning_event_value_as_float(value: object, label: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be numeric") from exc
+
+
+def _tuning_callback_builder(
+    paths: RuntimePaths,
+    tuning_run_id: str,
+    job_id: str | None = None,
+) -> Callable[[dict[str, Any]], None]:
+    def _append(event: dict[str, Any]) -> None:
+        event_type = str(event.get("event", "").strip())
+        if not event_type:
+            return
+
+        if job_id is not None:
+            sqlite_store.append_job_event(
+                paths,
+                job_id,
+                event_type,
+                {
+                    **event,
+                    "tuning_run_id": tuning_run_id,
+                },
+            )
+
+        if event_type == "tuning.candidate.evaluated":
+            params = event.get("params")
+            metrics = event.get("metrics")
+            score = event.get("score")
+            run_id = str(event.get("run_id", "")).strip()
+            if not isinstance(params, dict):
+                raise ValueError("tuning event params must be a dict")
+            if not isinstance(metrics, dict):
+                raise ValueError("tuning event metrics must be a dict")
+            if not run_id:
+                raise ValueError("tuning event must include run_id")
+
+            sqlite_store.append_tuning_trial(
+                paths,
+                tuning_run_id=tuning_run_id,
+                backtest_run_id=run_id,
+                params=params,
+                metrics=metrics,
+                score=_tuning_event_value_as_float(score, "score"),
+            )
+            return
+
+        if event_type == "tuning.layer.completed":
+            layer_name = str(event.get("layer", "")).strip() or "layer_unknown"
+            attempted = int(event.get("attempted", event.get("candidate_count", 0)))
+            reason = (
+                f"attempted={attempted} "
+                f"best_score={event.get('best_score')}"
+            )
+            sqlite_store.append_tuning_layer_decision(
+                paths,
+                tuning_run_id=tuning_run_id,
+                layer_name=str(layer_name),
+                enabled=True,
+                reason=reason,
+                payload=event,
+            )
+
+    return _append
+
+
+def _run_tuning_request_payload(request: TuningRunRequest) -> dict[str, Any]:
+    payload = _build_tuning_request_payload(request)
+    if request.max_estimated_seconds is not None:
+        payload["max_estimated_seconds"] = request.max_estimated_seconds
+    return payload
+
+
+def _build_tuning_initial_payload(
+    request: TuningRunRequest,
+    tuning_run_id: str,
+    status: str,
+    preflight: dict[str, float] | None,
+) -> dict[str, Any]:
+    payload = _normalize_tuning_run_payload(
+        request=request,
+        tuning_result={"status": status, "result_type": "tuning"},
+        run_id=tuning_run_id,
+        status=status,
+    )
+    if preflight is not None:
+        payload["preflight"] = preflight
+    payload["request"] = _run_tuning_request_payload(request)
+    return payload
+
+
+def _precheck_tuning_budget(request: TuningRunRequest) -> dict[str, float] | None:
+    if request.max_estimated_seconds is None:
+        return None
+    per_trial_estimated_seconds = float(request.timeout_seconds) + 1.0
+    return enforce_tuning_budget(
+        num_trials=request.max_trials,
+        per_trial_estimated_seconds=per_trial_estimated_seconds,
+        max_estimated_seconds=request.max_estimated_seconds,
+    )
+
+
+def _run_tuning_engine(
+    paths: RuntimePaths,
+    request: TuningRunRequest,
+    tuning_run_id: str,
+    callback: Callable[[dict[str, Any]], None] | None,
+) -> dict[str, Any]:
+    result = tune_strategy(
+        paths=paths,
+        strategy_name=request.strategy_name,
+        source_code=request.source_code,
+        universe=request.universe,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        search_space=request.search_space,
+        objective=request.objective,
+        max_trials=request.max_trials,
+        max_layers=request.max_layers,
+        keep_top=request.keep_top,
+        max_trials_per_layer=request.max_trials_per_layer,
+        timeout_seconds=request.timeout_seconds,
+        memory_mb=request.memory_mb,
+        cpu_seconds=request.cpu_seconds,
+        context=request.context,
+        use_optuna=request.use_optuna,
+        random_seed=request.random_seed,
+        run_code_fn=None,
+        event_callback=callback,
+        only_plan=request.only_plan,
+    )
+    return _normalize_tuning_run_payload(request, result, run_id=tuning_run_id, status=result["status"])
+
+
+def _run_tuning_job(
+    paths: RuntimePaths,
+    tuning_run_id: str,
+    request: TuningRunRequest,
+    job_id: str | None = None,
+    preflight: dict[str, float] | None = None,
+) -> None:
+    callback = _tuning_callback_builder(paths, tuning_run_id=tuning_run_id, job_id=job_id)
+    try:
+        result_payload = _run_tuning_engine(paths, request, tuning_run_id=tuning_run_id, callback=callback)
+        if preflight is not None:
+            result_payload["preflight"] = preflight
+        sqlite_store.update_tuning_run(paths, tuning_run_id, result_payload)
+        if job_id is not None:
+            sqlite_store.update_job_status(
+                paths,
+                job_id,
+                status="completed",
+                result={
+                    "tuning_run_id": tuning_run_id,
+                    "result": result_payload["result"],
+                },
+            )
+        _append_audit_event(
+            paths,
+            "tuning.run.completed",
+            {
+                "tuning_run_id": tuning_run_id,
+                "trials_attempted": result_payload.get("result", {}).get("trials_attempted", 0),
+                "best_score": result_payload.get("result", {}).get("best_candidate", {}).get("score"),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_payload = _build_tuning_initial_payload(request=request, tuning_run_id=tuning_run_id, status="failed", preflight=preflight)
+        error_payload["result"] = {"status": "failed", "error": str(exc), "error_type": type(exc).__name__}
+        sqlite_store.update_tuning_run(paths, tuning_run_id, error_payload)
+        if job_id is not None:
+            sqlite_store.update_job_status(
+                paths,
+                job_id,
+                status="failed",
+                error_text=str(exc),
+                result={"tuning_run_id": tuning_run_id},
+            )
+        _append_audit_event(
+            paths,
+            "tuning.run.failed",
+            {
+                "tuning_run_id": tuning_run_id,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        )
 
 
 app = FastAPI(title="Fin-Agent Stage 1 API", version="0.1.0")
@@ -1030,24 +1229,6 @@ def fundamentals_as_of(request: FundamentalsAsOfRequest) -> dict[str, Any]:
     return {"row": row}
 
 
-@app.post("/v1/brainstorm/lock")
-def lock_intent(intent: dict[str, Any]) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/brainstorm/lock")
-    return {}
-
-
-@app.post("/v1/brainstorm/agent-decides/propose")
-def brainstorm_agent_decides_propose(request: AgentDecidesProposeRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/brainstorm/agent-decides/propose")
-    return {}
-
-
-@app.post("/v1/brainstorm/agent-decides/confirm")
-def brainstorm_agent_decides_confirm(request: AgentDecidesConfirmRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/brainstorm/agent-decides/confirm")
-    return {}
-
-
 @app.post("/v1/code-strategy/validate")
 def code_strategy_validate(request: CodeStrategyValidateRequest) -> dict[str, Any]:
     try:
@@ -1108,6 +1289,31 @@ def code_strategy_versions_list(strategy_id: str, limit: int = Query(default=100
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"strategy_id": strategy_id, "versions": versions, "count": len(versions)}
+
+
+@app.get("/v1/strategies")
+def strategies_list(limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "strategy_endpoints_deprecated",
+            "message": "Legacy strategy endpoints are deprecated; use /v1/code-strategies",
+            "deprecated_limit": limit,
+        },
+    )
+
+
+@app.get("/v1/strategies/{strategy_id}/versions")
+def strategy_versions_list(strategy_id: str, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "strategy_endpoints_deprecated",
+            "message": "Legacy strategy versions endpoint is deprecated; use /v1/code-strategies/{strategy_id}/versions",
+            "strategy_id": strategy_id,
+            "deprecated_limit": limit,
+        },
+    )
 
 
 @app.post("/v1/code-strategy/run-sandbox")
@@ -1181,6 +1387,76 @@ def code_strategy_backtest(request: CodeStrategyBacktestRequest) -> dict[str, An
     return {**run, "preflight": preflight}
 
 
+@app.post("/v1/tuning/runs")
+def create_tuning_run(request: TuningRunRequest) -> dict[str, Any]:
+    paths = _runtime_paths()
+    try:
+        preflight = _precheck_tuning_budget(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tuning_run_id = str(uuid.uuid4())
+    initial_payload = _build_tuning_initial_payload(
+        request=request,
+        tuning_run_id=tuning_run_id,
+        status="queued",
+        preflight=preflight,
+    )
+    sqlite_store.save_tuning_run(paths=paths, strategy_name=request.strategy_name, payload=initial_payload)
+
+    if request.run_async:
+        try:
+            job_id = sqlite_store.create_job(
+                paths,
+                job_type="tuning",
+                payload={"tuning_run_id": tuning_run_id, "request": _run_tuning_request_payload(request)},
+            )
+            sqlite_store.update_job_status(paths, job_id, "running")
+            sqlite_store.update_tuning_run(paths, tuning_run_id, {"status": "running"})
+            thread = threading.Thread(
+                target=_run_tuning_job,
+                args=(paths, tuning_run_id, request, job_id, preflight),
+                daemon=True,
+            )
+            thread.start()
+        except Exception as exc:  # noqa: BLE001
+            fallback = _build_tuning_initial_payload(request=request, tuning_run_id=tuning_run_id, status="failed", preflight=preflight)
+            fallback["result"] = {"status": "failed", "error": str(exc), "error_type": type(exc).__name__}
+            sqlite_store.update_tuning_run(paths, tuning_run_id, fallback)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return {
+            "tuning_run_id": tuning_run_id,
+            "job_id": job_id,
+            "status": "running",
+            "request": _run_tuning_request_payload(request),
+            "preflight": preflight,
+        }
+
+    try:
+        sqlite_store.update_tuning_run(paths, tuning_run_id, {"status": "running"})
+        result_payload = _run_tuning_engine(
+            paths=paths,
+            request=request,
+            tuning_run_id=tuning_run_id,
+            callback=_tuning_callback_builder(paths, tuning_run_id=tuning_run_id),
+        )
+        if preflight is not None:
+            result_payload["preflight"] = preflight
+        sqlite_store.update_tuning_run(paths, tuning_run_id, result_payload)
+        return result_payload
+    except ValueError as exc:
+        error_payload = _build_tuning_initial_payload(request=request, tuning_run_id=tuning_run_id, status="failed", preflight=preflight)
+        error_payload["result"] = {"status": "failed", "error": str(exc), "error_type": type(exc).__name__}
+        sqlite_store.update_tuning_run(paths, tuning_run_id, error_payload)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        error_payload = _build_tuning_initial_payload(request=request, tuning_run_id=tuning_run_id, status="failed", preflight=preflight)
+        error_payload["result"] = {"status": "failed", "error": str(exc), "error_type": type(exc).__name__}
+        sqlite_store.update_tuning_run(paths, tuning_run_id, error_payload)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/v1/code-strategy/analyze")
 def code_strategy_analyze(request: CodeStrategyAnalyzeRequest) -> dict[str, Any]:
     paths = _runtime_paths()
@@ -1205,28 +1481,6 @@ def code_strategy_analyze(request: CodeStrategyAnalyzeRequest) -> dict[str, Any]
         },
     )
     return report
-
-
-def _legacy_endpoint_disabled(path: str) -> None:
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "error": "legacy_endpoint_disabled",
-            "path": path,
-            "reason": "legacy intent/manual strategy flow has been removed",
-            "remediation": {
-                "required_flow": [
-                    "code_strategy_validate",
-                    "preflight_custom_code",
-                    "code_strategy_run_sandbox",
-                    "code_strategy_backtest",
-                    "code_strategy_analyze",
-                    "code_strategy_save",
-                ],
-                "message": "Use agent-generated Python strategy code and code-strategy tools only.",
-            },
-        },
-    )
 
 
 def _resolve_code_strategy_runtime(paths: RuntimePaths, strategy_version_id: str) -> dict[str, Any]:
@@ -1265,33 +1519,6 @@ def _resolve_code_strategy_runtime(paths: RuntimePaths, strategy_version_id: str
         "end_date": end_date,
         "latest_run_id": latest_run.get("run_id"),
     }
-
-
-def _read_csv_rows(path: str) -> list[dict[str, Any]]:
-    csv_path = Path(path)
-    if not csv_path.exists():
-        raise ValueError(f"artifact not found: {path}")
-    with csv_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        return [dict(row) for row in reader]
-
-
-@app.post("/v1/strategy/from-intent")
-def strategy_from_intent(request: StrategyBuildRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/strategy/from-intent")
-    return {}
-
-
-@app.get("/v1/strategies")
-def strategies_list(limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/strategies")
-    return {}
-
-
-@app.get("/v1/strategies/{strategy_id}/versions")
-def strategy_versions_list(strategy_id: str, limit: int = Query(default=100, gt=0)) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/strategies/{strategy_id}/versions")
-    return {}
 
 
 @app.post("/v1/world-state/build")
@@ -1365,18 +1592,6 @@ def preflight_world_state(request: PreflightWorldStateRequest) -> dict[str, floa
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/v1/preflight/backtest")
-def preflight_backtest(request: PreflightBacktestRequest) -> dict[str, float]:
-    _legacy_endpoint_disabled("/v1/preflight/backtest")
-    return {}
-
-
-@app.post("/v1/preflight/tuning")
-def preflight_tuning(request: PreflightTuningRequest) -> dict[str, float]:
-    _legacy_endpoint_disabled("/v1/preflight/tuning")
-    return {}
 
 
 @app.post("/v1/preflight/custom-code")
@@ -1485,18 +1700,6 @@ def nse_quote(request: NseQuoteRequest) -> dict[str, Any]:
     return {"provider": "nse", "payload": payload}
 
 
-@app.post("/v1/tuning/search-space/derive")
-def tuning_search_space_derive(request: TuningSearchSpaceRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/tuning/search-space/derive")
-    return {}
-
-
-@app.post("/v1/tuning/run")
-def tuning_run(request: TuningRunRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/tuning/run")
-    return {}
-
-
 @app.get("/v1/tuning/runs")
 def tuning_runs_list(
     strategy_name: str | None = None,
@@ -1526,10 +1729,13 @@ def tuning_run_detail(tuning_run_id: str) -> dict[str, Any]:
     }
 
 
-@app.post("/v1/analysis/deep-dive")
-def analysis_deep_dive(request: AnalysisDeepDiveRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/analysis/deep-dive")
-    return {}
+def _read_csv_rows(path: str) -> list[dict[str, Any]]:
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise ValueError(f"artifact not found: {path}")
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return [dict(row) for row in reader]
 
 
 @app.post("/v1/visualize/trade-blotter")
@@ -1751,29 +1957,6 @@ def backtest_run_detail(run_id: str) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return run
-
-
-def _run_backtest_job(paths: RuntimePaths, job_id: str, trace_id: str) -> None:
-    sqlite_store.update_job_status(
-        paths,
-        job_id,
-        "failed",
-        error_text=(
-            "legacy async backtest jobs are disabled; use code_strategy_backtest from agent tools"
-        ),
-    )
-
-
-@app.post("/v1/backtests/run")
-def backtest_run(request: BacktestRequest) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/backtests/run")
-    return {}
-
-
-@app.post("/v1/backtests/run-async")
-def backtest_run_async(request: BacktestRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
-    _legacy_endpoint_disabled("/v1/backtests/run-async")
-    return {}
 
 
 @app.post("/v1/backtests/compare")

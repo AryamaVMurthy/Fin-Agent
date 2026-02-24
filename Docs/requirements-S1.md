@@ -2,11 +2,11 @@
 
 ## 1. Brief Summary
 Build a chat-first system (OpenCode/OpenClaw style) with one main orchestrator agent that uses tools for everything.  
-Phase 1 delivers complete strategy lifecycle: brainstorm, strategy creation, save/version, PIT world-state build (time-travel), backtest, tuning, deep analysis, visualization, live in-app insights/alerts, boundary-near suggestions, and persistent context/memory.
+Phase 1 delivers complete strategy lifecycle: interactive strategy intake, strategy creation, save/version, PIT world-state build (time-travel), backtest, tuning ledger review, visualization, live in-app insights/alerts, boundary-near suggestions, and persistent context/memory.
 
 Latest locked additions included:
-- Interactive brainstorm flow.
-- Optional `agent_decides` mode (agent fills defaults, user confirms).
+- Interactive strategy intake flow.
+- Optional assisted-default mode (agent fills defaults, user confirms).
 - Custom Python strategy lane (sandboxed).
 - Strong context/memory persistence and replay.
 - Stage 1 scope only (no news/social/macro ingestion yet).
@@ -48,7 +48,7 @@ Latest locked additions included:
 - Timeframe defaults.
 - Benchmark + cost model.
 - PIT strictness (default hard block).
-- Brainstorm mode default (`interactive` or `agent_decides`).
+- Strategy-intake mode default (`interactive` or assisted-default).
 
 ## 3.3 Strategy Library
 - Drafts, saved versions, diffs, cloned variants.
@@ -85,7 +85,7 @@ Latest locked additions included:
 
 ## Phase 1 Agent Modes
 - `interactive_user_guided`: asks all required trade design questions.
-- `agent_decides`: agent proposes full parameter set + decision card; user confirms or edits.
+- `assisted-default`: agent proposes full parameter set + decision summary; user confirms or edits.
 
 ## Hard Constraints
 - No hidden fallback.
@@ -96,7 +96,7 @@ Latest locked additions included:
 
 ---
 
-## 5. Mandatory Interactive Brainstorm Specification
+## 5. Mandatory Interactive Strategy Intake Specification
 
 ## 5.1 Intake Question Sets
 1. Portfolio structure:
@@ -137,12 +137,12 @@ Latest locked additions included:
 - Cost/slippage model.
 - Execution timing assumptions.
 
-## 5.2 Brainstorm Session Lifecycle
+## 5.2 Strategy Intake Lifecycle
 - `start -> ask -> answer -> revise -> summarize -> lock`.
 - Lock creates immutable `IntentSnapshot`.
 - Strategy generation requires locked snapshot.
 
-## 5.3 Agent-Decides Option
+## 5.3 Assisted-Default Option
 - Agent fills unresolved fields using policy templates.
 - Returns `DecisionCard` with:
 - chosen value,
@@ -178,7 +178,7 @@ Latest locked additions included:
 ## 7. Strategy Lifecycle (End-to-End)
 
 1. User starts chat with idea.
-2. Agent runs brainstorm session (interactive or agent-decides).
+2. Agent runs strategy intake session (interactive or assisted-default).
 3. Agent creates explainable `StrategySpec`.
 4. User reviews and saves version anytime.
 5. Agent resolves universe and builds world state.
@@ -230,15 +230,14 @@ Rule:
 - `job.status`
 - `artifact.fetch`
 
-## Brainstorm and intent
-- `brainstorm.session.start`
-- `brainstorm.question.next`
-- `brainstorm.answer.submit`
-- `brainstorm.summary.get`
-- `brainstorm.lock`
-- `brainstorm.mode.set`
-- `brainstorm.autofill.propose`
-- `brainstorm.decision_card.confirm`
+## Strategy workflow
+- `code.strategy.validate`
+- `code.strategy.save`
+- `code.strategy.list`
+- `code.strategy.versions`
+- `code.strategy.run_sandbox`
+- `code.strategy.backtest`
+- `code.strategy.analyze`
 
 ## Accounts
 - `auth.kite.connect`
@@ -247,12 +246,11 @@ Rule:
 - `auth.opencode.openai.oauth.status`
 
 ## Strategy core
-- `strategy.spec.validate`
-- `strategy.from_intent_snapshot`
-- `strategy.version.create`
-- `strategy.version.diff`
-- `strategy.suggest_improvements`
-- `strategy.list`
+- `strategy_spec.validate`
+- `strategy_version.create`
+- `strategy_version.diff`
+- `strategy.improve.suggest`
+- `strategy.version.list`
 
 ## Data + universe
 - `universe.resolve`
@@ -270,11 +268,12 @@ Rule:
 - `world_state.leak_check`
 
 ## Compute and analysis
-- `backtest.run`
+- `backtest.list`
 - `backtest.compare`
-- `tuning.search_space.derive`
-- `tuning.run`
-- `analysis.deep_dive`
+- `tuning.list`
+- `tuning.detail`
+- `code.backtest.run`
+- `code.analyze`
 
 ## Visualization
 - `visualize.equity_curve`
@@ -295,7 +294,7 @@ Rule:
 - `code.strategy.validate`
 - `code.backtest.run`
 - `code.analysis.deep_dive`
-- `code.brainstorm.improvements`
+- `code.strategy.improvements`
 - `code.patch.suggest`
 - `code.visualize.metrics`
 
@@ -334,23 +333,30 @@ Rule:
 - `POST /v1/chat/respond`
 - `GET /v1/tools`
 - `POST /v1/tools/{tool_id}/run`
-- `POST /v1/brainstorm/sessions`
-- `POST /v1/brainstorm/sessions/{id}/answers`
-- `POST /v1/brainstorm/sessions/{id}/mode`
-- `POST /v1/brainstorm/sessions/{id}/autofill`
-- `POST /v1/brainstorm/sessions/{id}/lock`
-- `POST /v1/strategies`
-- `POST /v1/strategies/{id}/versions`
+- `POST /v1/code-strategy/validate`
+- `POST /v1/code-strategy/save`
+- `GET /v1/code-strategies`
+- `GET /v1/code-strategies/{strategy_id}/versions`
 - `POST /v1/universe/resolve`
+- `POST /v1/world-state/completeness`
+- `POST /v1/world-state/validate-pit`
 - `POST /v1/world-state/build`
-- `POST /v1/backtests/run`
-- `POST /v1/tuning/run`
-- `POST /v1/live/{strategy_version_id}/activate`
-- `GET /v1/live/signals`
-- `POST /v1/code/strategies`
-- `POST /v1/code/validate`
-- `POST /v1/code/backtest`
-- `POST /v1/code/improve`
+- `POST /v1/preflight/world-state`
+- `POST /v1/preflight/custom-code`
+- `POST /v1/code-strategy/run-sandbox`
+- `POST /v1/code-strategy/backtest`
+- `POST /v1/code-strategy/analyze`
+- `GET /v1/backtests/runs`
+- `GET /v1/backtests/runs/{run_id}`
+- `GET /v1/tuning/runs`
+- `GET /v1/tuning/runs/{tuning_run_id}`
+- `POST /v1/live/activate`
+- `POST /v1/live/pause`
+- `POST /v1/live/stop`
+- `GET /v1/live/feed`
+- `GET /v1/live/states`
+- `GET /v1/live/states/{strategy_version_id}`
+- `GET /v1/live/boundary-candidates`
 - `GET /v1/artifacts/{artifact_id}`
 
 ---
@@ -413,9 +419,9 @@ Every major result returns:
 
 ## 14. Complete Functional Test Matrix
 
-## Brainstorm and intent
+## Strategy intake and intent
 1. Full interactive intake completion and lock.
-2. Agent-decides decision card generation and confirmation.
+2. Assisted-default suggestion generation and confirmation.
 3. Mode switching without context loss.
 4. Blocking behavior when required fields missing.
 
@@ -468,7 +474,7 @@ Every major result returns:
 - World-state and leak-check engine.
 
 ## Stage C: Agent workflows and strategy lifecycle
-- Brainstorm modes, intent locking, strategy spec generation, versioning.
+- Strategy-intake modes, intent locking, strategy spec generation, versioning.
 
 ## Stage D: Compute, tuning, and explainability
 - Backtest engine, tuning engine, compare, deep analysis, explainability outputs.
@@ -485,8 +491,8 @@ Every major result returns:
 ---
 
 ## 16. Explicit Assumptions and Defaults
-- Default brainstorm mode: `interactive_user_guided`.
-- `agent_decides` mode available at all times.
+- Default strategy-intake mode: `interactive_user_guided`.
+- Assisted-default mode available at all times.
 - PIT strict mode default: hard block on critical missing dependencies.
 - Alerts default: in-app only.
 - Stage 1 runtime: single orchestrator agent.

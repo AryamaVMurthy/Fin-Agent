@@ -8,7 +8,7 @@ This document defines the complete Stage 1 end-to-end design for `Fin-Agent` as 
 - Chat-first user experience as primary interaction mode.
 - Single orchestrator agent as default.
 - All non-core actions are tools/commands/skills executed via explicit tool calls.
-- Deterministic strategy lifecycle: brainstorm -> strategy -> backtest -> tune -> analyze -> save/edit -> activate insights.
+- Deterministic strategy lifecycle: strategy intake -> strategy spec -> backtest -> analyze -> save/edit -> activate insights.
 - Time-travel (Point-in-Time) simulation for historical backtests.
 - Local persistence of all state and artifacts.
 - Event-driven execution where long-running tools hand control back to the agent when completed.
@@ -57,7 +57,7 @@ flowchart TD
     U[User (Chat UI)] -->|chat message + settings| O[OpenCode UI / Chat Surface]
     O --> A[Orchestrator Agent (single)]
     A --> R[Tool Router / Dispatcher]
-    R --> B1[Brainstorm & Intent Tools]
+    R --> B1[Strategy Intake & Spec Tools]
     R --> B2[Data/Universe Tools]
     R --> B3[PIT World-State Tools]
     R --> B4[Backtest + Metrics Tools]
@@ -153,14 +153,14 @@ All finance features are built as a **thin layer over OpenCode**:
 - Commands: direct trigger shortcuts for users.
 
 ### 7.3 Mandatory Agent Workflows
-- `brainstorm.session.start`
-- `brainstorm.session.next`
-- `strategy.from_intent`
+- `strategy.intake.start`
+- `strategy.intake.continue`
+- `code.strategy.save`
 - `data.universe.resolve`
 - `world_state.build`
-- `backtest.run`
-- `tuning.run`
-- `analysis.deep_dive`
+- `code.backtest.run`
+- `tuning.list`
+- `analysis.metrics`
 - `visualize.*`
 - `strategy.version.create`
 - `live.activate` / `live.pause` / `live.stop`
@@ -196,17 +196,17 @@ Each historical timestamp is simulated from only data with publication time <= t
 ```mermaid
 flowchart TD
     U1[User idea/chat] --> I1[Intake in agent]
-    I1 --> Q1[Brainstorm questions or agent_decides]
-    Q1 --> L1[Lock intent snapshot + decision provenance]
+    I1 --> Q1[Strategy intake questions or assisted defaults]
+    Q1 --> L1[Lock strategy intake snapshot + decision provenance]
     L1 --> S1[Build StrategySpec]
     S1 --> V1[Validate strategy + risk policy]
     V1 --> U2[Resolve universe and build PIT snapshots]
     U2 --> B1[Backtest run (job created)]
     B1 --> EV[Event when run completes]
     EV --> M1[Metrics + benchmark compare + explainability]
-    M1 --> T1[Tuning suggestion or run]
+    M1 --> T1[Tuning ledger and improvement suggestions]
     T1 --> EV2[Event]
-    EV2 --> A1[Deep analysis + suggestions]
+    EV2 --> A1[Analysis + recommendations]
     A1 --> C1[User edits/append improvements]
     C1 --> SV[Save version]
     SV --> L2[Activate insights]
@@ -289,14 +289,14 @@ If estimate exceeds threshold:
 - `memory.context.compact`
 - `memory.context.clear_scope`
 
-### Brainstorming
-- `brainstorm.session.start`
-- `brainstorm.question.next`
-- `brainstorm.answer.submit`
-- `brainstorm.lock`
-- `brainstorm.autofill.propose`
-- `brainstorm.decision_card.confirm`
-- `brainstorm.mode.set`
+### Strategy intake and spec
+- `strategy.intake.start`
+- `strategy.intake.question`
+- `strategy.intake.answer`
+- `strategy.intake.lock`
+- `strategy.intake.assist`
+- `strategy.intake.confirm`
+- `strategy.intake.mode`
 
 ### Market data and universe
 - `universe.resolve`
@@ -316,15 +316,16 @@ If estimate exceeds threshold:
 - `world_state.diff`
 
 ### Strategy and backtest
-- `strategy.spec.validate`
-- `strategy.create_from_intent`
+- `code.strategy.validate`
+- `code.strategy.save`
+- `code.strategy.run_sandbox`
 - `strategy.version.create`
 - `strategy.version.list`
 - `strategy.version.diff`
-- `backtest.run`
+- `code.backtest.run`
 - `backtest.compare`
-- `tuning.run`
-- `analysis.deep_dive`
+- `tuning.list`
+- `tuning.detail`
 - `analysis.metrics`
 
 ### Visualization
@@ -472,7 +473,7 @@ Every major output (backtest, tuning, tuning suggestion, insights) returns:
 - Leak checks + manifests
 
 ### Stage C: Strategy lifecycle
-- Brainstorm modes
+- Strategy intake modes
 - Strategy spec and versioning
 
 ### Stage D: Compute and tuning
@@ -495,8 +496,8 @@ Every major output (backtest, tuning, tuning suggestion, insights) returns:
 ## 22) Stage 1 Acceptance Criteria
 
 - A user can chat naturally from a clean screen.
-- User can complete interactive brainstorming with no implicit assumptions.
-- User can execute `agent_decides` mode with explicit decision card review.
+- User can complete interactive strategy intake with no implicit assumptions.
+- User can run assisted-default mode with explicit confirmation review.
 - A valid strategy can be built, backtested, tuned, analyzed, and saved.
 - The same strategy version can be replayed from history and produce the same outputs.
 - A strategy can be activated for insights and produce buy/sell/hold and near-boundary signals.

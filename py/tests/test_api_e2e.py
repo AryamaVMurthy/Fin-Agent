@@ -252,14 +252,6 @@ class ApiE2ETests(unittest.TestCase):
                     self.assertEqual(status, 200)
                     self.assertEqual(ratings_import["rows_inserted"], 1)
     
-                    status, legacy = _http_json(
-                        "POST",
-                        f"{base}/v1/brainstorm/agent-decides/propose",
-                        {"universe": ["ABC"], "start_date": "2025-01-01", "end_date": "2025-01-10"},
-                    )
-                    self.assertEqual(status, 410)
-                    self.assertEqual(legacy["detail"]["error"], "legacy_endpoint_disabled")
-    
                     status, world_preflight = _http_json(
                         "POST",
                         f"{base}/v1/preflight/custom-code",

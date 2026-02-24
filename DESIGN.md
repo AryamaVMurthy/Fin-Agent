@@ -85,7 +85,7 @@ flowchart TD
 The user can:
 
 1. Choose universe/timeframe/capital/risk knobs.
-2. Ask agent to decide defaults (`agent_decides` path).
+2. Ask agent to propose assisted defaults when acceptable.
 3. Confirm/reject decision cards.
 4. Trigger backtest, compare runs, tune, analyze.
 5. Save/edit/re-run strategies.
@@ -234,12 +234,15 @@ Main API lives in `py/fin_agent/api/app.py`.
 6. `POST /v1/data/technicals/compute`
 7. `POST /v1/universe/resolve`
 
-### 9.4 Brainstorm + Strategy
+### 9.4 Strategy Intake + Strategy
 
-1. `POST /v1/brainstorm/lock`
-2. `POST /v1/brainstorm/agent-decides/propose`
-3. `POST /v1/brainstorm/agent-decides/confirm`
-4. `POST /v1/strategy/from-intent`
+1. `POST /v1/code-strategy/validate`
+2. `POST /v1/code-strategy/save`
+3. `GET /v1/code-strategies`
+4. `GET /v1/code-strategies/{strategy_id}/versions`
+5. `POST /v1/code-strategy/run-sandbox`
+6. `POST /v1/code-strategy/backtest`
+7. `POST /v1/code-strategy/analyze`
 
 ### 9.5 World State and Preflight
 
@@ -247,26 +250,25 @@ Main API lives in `py/fin_agent/api/app.py`.
 2. `POST /v1/world-state/completeness`
 3. `POST /v1/world-state/validate-pit`
 4. `POST /v1/preflight/world-state`
-5. `POST /v1/preflight/backtest`
-6. `POST /v1/preflight/tuning`
-7. `POST /v1/preflight/custom-code`
+5. `POST /v1/preflight/custom-code`
 
 ### 9.6 Backtest + Analysis + Live
 
-1. `POST /v1/backtests/run`
-2. `POST /v1/backtests/run-async`
+1. `GET /v1/backtests/runs`
+2. `GET /v1/backtests/runs/{run_id}`
 3. `POST /v1/backtests/compare`
 4. `POST /v1/backtests/tax/report`
-5. `POST /v1/tuning/search-space/derive`
-6. `POST /v1/tuning/run`
-7. `POST /v1/analysis/deep-dive`
-8. `POST /v1/visualize/trade-blotter`
-9. `POST /v1/visualize/boundary`
-10. `POST /v1/live/activate`
-11. `POST /v1/live/pause`
-12. `POST /v1/live/stop`
-13. `GET /v1/live/feed`
-14. `GET /v1/live/boundary-candidates`
+5. `POST /v1/visualize/trade-blotter`
+6. `POST /v1/visualize/boundary`
+7. `GET /v1/tuning/runs`
+8. `GET /v1/tuning/runs/{tuning_run_id}`
+9. `POST /v1/live/activate`
+10. `POST /v1/live/pause`
+11. `POST /v1/live/stop`
+12. `GET /v1/live/states`
+13. `GET /v1/live/states/{strategy_version_id}`
+14. `GET /v1/live/feed`
+15. `GET /v1/live/boundary-candidates`
 
 ### 9.7 Context + Observability + Operations
 
@@ -323,7 +325,7 @@ Filesystem artifacts include:
 
 ## 11. Key Functional Flows
 
-### 11.1 Brainstorm to Locked Intent
+### 11.1 Strategy Intake to Locked Spec
 
 ```mermaid
 sequenceDiagram
@@ -333,11 +335,11 @@ sequenceDiagram
     participant DB as SQLite
 
     User->>Agent: Describe strategy in NL
-    Agent->>API: /v1/brainstorm/agent-decides/propose
+    Agent->>API: /v1/code-strategy/validate
     API-->>Agent: Proposed intent + decision card
     Agent->>User: Show assumptions for confirmation
     User->>Agent: Confirm/edit
-    Agent->>API: /v1/brainstorm/agent-decides/confirm
+    Agent->>API: /v1/code-strategy/save
     API->>DB: Save intent snapshot
     API-->>Agent: intent_snapshot_id
 ```
@@ -351,22 +353,21 @@ sequenceDiagram
     participant DDB as DuckDB
     participant SDB as SQLite
 
-    Agent->>API: /v1/strategy/from-intent
+    Agent->>API: /v1/code-strategy/validate
     API->>SDB: Save strategy version
     Agent->>API: /v1/world-state/build
     API->>DDB: Build PIT manifest inputs
-    Agent->>API: /v1/backtests/run
+    Agent->>API: /v1/code-strategy/backtest
     API->>DDB: Read OHLCV + features
     API->>SDB: Save run metadata
     API-->>Agent: run_id + metrics + artifact paths
 ```
 
 ### 11.3 Tuning and Deep Analysis
-
-1. Agent derives search space with `/v1/tuning/search-space/derive`.
-2. Agent runs constrained tuning via `/v1/tuning/run`.
-3. Agent requests explanation from `/v1/analysis/deep-dive`.
-4. User decides whether to apply suggested improvements.
+1. Agent inspects historical run history via `/v1/backtests/runs`.
+2. Agent lists prior tuning diagnostics via `/v1/tuning/runs` and `/v1/tuning/runs/{id}`.
+3. Agent uses existing run + world-state artifacts to propose explainable refinements.
+4. User accepts refinements and applies via agent-driven code-strategy updates.
 
 ### 11.4 Live Insight Lifecycle
 
@@ -620,4 +621,3 @@ Fin-Agent Stage 1 is designed as a **production-hardened, chat-first, tool-orche
 3. Local-first persistence and artifact lineage.
 4. Explicit safety/diagnostics/fail-fast behavior.
 5. Deployable as a TUI wrapper stack over OpenCode runtime.
-
